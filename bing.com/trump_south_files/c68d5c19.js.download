@@ -1,0 +1,148 @@
+// This script is included inline within the Windows Live login popup
+//
+// It contains event handlers to update the identity header whenever the user's identity may have changed.
+var wln = wln || "";
+var Identity;
+(function (Identity) {
+    if (Identity && Identity.sglid && sj_be && sj_cook && sj_evt && _d && typeof(_d.querySelectorAll) !== "undefined") {
+        var recordClick = function (button) {
+            var isAuth = button.getAttribute("data-a");
+            var provider = button.getAttribute("data-p");
+
+            if (isAuth === "false" && provider != null) {
+                sj_be(button, "click", function() { sj_cook.set("SRCHUSR", "POEX", provider, true, "/"); });
+            }
+        }
+
+        sj_evt.bind("identityHeaderShown",
+            function() {
+                var recorded = false;
+
+                sj_be(_ge("id_l"),
+                    "click",
+                    function() {
+                        if (!recorded) {
+                            var menuItems = _d.querySelectorAll(".b_imi");
+
+                            for (var i = 0; i < menuItems.length; i++) {
+                                recordClick(menuItems[i]);
+                            }
+
+                            recorded = true;
+                        }
+                    });
+            },
+            true);
+    }
+
+    if (sj_evt && Identity) {
+        var updateIdHeader = function (currentUser) {
+            if (currentUser != null && currentUser.idp === "orgid") {
+                var wlid = Identity.wlProfile();
+
+                if (wlid != null && wlid.name != null && currentUser.name == null) {
+                    // do not overwrite the MSA profile in the dual-auth case when AAD is signed out
+                    return;
+                }
+            }
+
+            var id_n = _ge("id_n"); // display name span
+            var id_p = _ge("id_p"); // user profile picture
+            var id_s = _ge("id_s"); // sign in text
+            var id_a = _ge("id_a"); // anonymous user picture
+            var id_f = _ge("id_f"); // greetings format for user name
+
+            var currentUserName = currentUser ? currentUser.displayName : wln; // Variable wln is defined in javaScriptApi.spark, as a work around for TFS 886908
+            var currentUserImage = currentUser ? currentUser.img : null;
+            var currentUserIdp = currentUser ? currentUser.idp : null;
+            if (id_n && id_s && id_a && currentUserName) {
+                if (id_p && currentUserImage) {
+                    id_p.title = currentUserName;
+                    id_p.src = currentUserImage;
+                    show(id_p);
+                }
+
+                if (currentUserName.length > 10) {
+                    currentUserName = currentUserName.substring(0, 10).replace(/\s+$/, '') + '\u2026' /*ellipsis*/;
+                }
+
+                if (id_f && id_f.innerText && id_f.innerText.length > 0) {
+                    // inserting the username in the localised format extracted from view
+                    currentUserName = id_f.innerText.replace("{0}", currentUserName);
+                }
+
+                id_n.textContent = currentUserName;
+                id_n.innerText = currentUserName;
+                show(id_n);
+                hide(id_s);
+                hide(id_a);
+
+                if (currentUserIdp === "WL") {
+                    // Windows Live returns a 1x1 transparent GIF for users who do not have a photo; use our silhouette image
+                    // as the background.
+                    id_p && (id_p.style.className += " sw_spd");
+                }
+            }
+            else if (id_n && id_s && id_a) {
+                hide(id_n);
+                if (id_p) hide(id_p);
+                show(id_s);
+                show(id_a);
+            }
+        };
+
+        sj_evt.bind(
+            "wl:auth", // When the Windows Live login popup has indiciated success and is about to close itself
+            function() {
+                updateIdHeader(Identity.wlProfile());
+            },
+            1 // Bind retroactively (code runs immediately if the wl:auth event has already fired)
+        );
+
+        sj_evt.bind(
+            "aad:signedout", // When the AAD single sign out popup has indicated success and is about to close itself
+            function () {
+                updateIdHeader({
+                    displayName: null,
+                    img: null,
+                    idp: "orgid"
+                });
+            },
+            1
+        );
+
+        // When AAD single sign in success, the iframe will post a message with user display name in it.
+        // Listen to the message and update the Id control
+        sj_evt.bind(
+            "aad:signedin",
+            function (e) {
+                if (e && e.length >= 2) {
+                    var authInfo = e[1];
+                    if (authInfo && authInfo.displayName && authInfo.uniqueName) {
+                        var orgIdProfile = {
+                            displayName: authInfo.displayName,
+                            // It's hard to pass this value from the config. The url format value is from \private\frontend\Answers\services\Identity\src\IdentityProvidersConfig.ini
+                            // Please keep parity to the config file when you make a change here.
+                            img: "/orgid/thumbnailPhoto?user=" + encodeURIComponent(authInfo.uniqueName),
+                            idp: "orgid"
+                        }
+
+                        updateIdHeader(orgIdProfile);
+                    }
+                }
+            },
+            1
+        );
+    }
+
+    function hide(obj) {
+        obj.style.display = "none";
+        obj.setAttribute("aria-hidden", "true");
+
+    }
+
+    function show(obj) {
+        obj.style.display = "inline-block";
+        obj.setAttribute("aria-hidden", "false");
+    }
+})(Identity || (Identity = {}));

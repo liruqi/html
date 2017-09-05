@@ -1,0 +1,36 @@
+///<reference path="../../../../../Shared/Content/Content/Script/Declarations/Shared.d.ts"/>
+var TwitterCarouselEventBinding;
+(function (TwitterCarouselEventBinding) {
+    var slideControlIdPrefix = "slideexp";
+    var slideIndex = 0;
+    function initTwitterCarouselEventBinding() {
+        sj_evt.bind("onP1", function () {
+            bindGalleryButton();
+        });
+    }
+    function bindGalleryButton() {
+        var glrElement = _ge('twcrsl');
+        var controlId = glrElement && glrElement.getAttribute('ctrl-id');
+        var prevTrackingLink = _ge('prevBtnInstTrackingLinkOfSocial');
+        var nextTrackingLink = _ge('nextBtnInstTrackingLinkOfSocial');
+        if (glrElement && controlId && prevTrackingLink && nextTrackingLink) {
+            sj_evt.bind("pager_updateindex", function (args) {
+                if (args && args.length >= 3) {
+                    logAction(args[1], slideControlIdPrefix + controlId, prevTrackingLink, nextTrackingLink, args[2]);
+                }
+            });
+        }
+    }
+    function logAction(thisId, actualId, prevLink, nextLink, currentIndex) {
+        if (thisId == actualId && typeof si_ct === 'function') {
+            if (currentIndex < slideIndex) {
+                si_ct(prevLink);
+            }
+            else if (currentIndex > slideIndex) {
+                si_ct(nextLink);
+            }
+            slideIndex = currentIndex;
+        }
+    }
+    initTwitterCarouselEventBinding();
+})(TwitterCarouselEventBinding || (TwitterCarouselEventBinding = {}));

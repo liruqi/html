@@ -1,0 +1,239 @@
+// Wireup script for sharing web results
+(function ()
+{
+
+    // private members
+    var isInitialized = false;
+    var isActive = false;
+    var activeItem = null;
+    var resultContainerID = "results_container";
+    var shareIconClassName = "sb_shr sw_conv";
+    var shareIconActiveClassName = "sb_shr sw_conva";
+    var skipLowerAnswerNodes = { "ans2 ans_n2 ans_msnO": 1 };
+    var directParentNodes = { "sb_h3 cttl": 1 };
+    var shareIconContainerClassName = "sb_ltw";
+    var answerClassName = "sb_ans";
+    var shareIcons = [];
+    var enableAnswerSharing = !!_G.SPSA;
+    var activeTopLevelNodes = enableAnswerSharing ? {"ansC": 1, "results": 1, "sa_bop": 1} : {"results": 1};
+    var wiredUp = false;
+    var iconWidth = 20;
+    var iconHeight = 20;
+    var iconLeftOffset = -28;
+
+    // private functions
+    var init = function ()
+    {
+        // only work in IE8+ since this feature is only enabled for social pane
+        if (typeof(_d.querySelector) === "undefined")
+        {
+            return;
+        }
+        
+        var css = ".sb_shr{"
+                + "left:" + iconLeftOffset + iconWidth + "px;"
+                + "width:0;"
+                + "float:right;"
+                + "margin-left:5px"
+                + "}"
+                + ".sb_ltw{"
+                +"margin:0 0 0 -55px;"
+                +"clear:both;"
+                +"float:left;"
+                +"display:block;"
+                +"width:50px"
+                +"}"
+                +".pi_tc{"
+                +"float:right;"
+                +"}";
+                
+        sj_ic(css);
+
+        // after self-initialization bind to events
+        sj_evt.bind("sp.enter_conv", showShareIcons, 1);
+        sj_evt.bind("sp.leave_conv", hideShareIcons, 1);
+        sj_evt.bind("sp.submit_conv", hideShareIcons); // we want to hide attach icon when user click post. 
+    };
+
+    var wireUp = function()
+    {
+        if (wiredUp) 
+        {
+            return; // wire up only once
+        }
+        
+        // grab result container's top-level children
+        var resultContainer = _ge(resultContainerID);
+        var topLevelNodes = resultContainer ? resultContainer.childNodes : [];
+
+        // iterate over top-level DIVs
+        for (var i = 0; i < topLevelNodes.length; i++)
+        {
+            var rootNode = topLevelNodes[i];
+
+            if ((rootNode.id && activeTopLevelNodes[rootNode.id]) || (rootNode.className && activeTopLevelNodes[rootNode.className]))
+            {
+                var rootChildNodes = rootNode ? rootNode.childNodes : [];
+
+                // iterate over all child elements, e.g. multiple web groups
+                for (var k = 0; k < rootChildNodes.length; k++)
+                {
+                    // walk over all child nodes and wire them up individually
+                    var element = rootChildNodes[k].firstChild;
+                    while (element)
+                    {
+                        var nodeType = element.nodeType;
+                        //3 -> text node; 8 -> comment node
+                        if (nodeType !== 3 && nodeType !== 8) wireupElement(element);
+                        element = element.nextSibling;
+                    }
+                }
+            }
+        }
+        wiredUp = true;
+    }
+    var wireupElement = function (parentElement)
+    {
+        var shareHeading;
+        var className = parentElement.className;
+        if (className && className.indexOf(answerClassName) > -1) // answers
+        {
+            if (enableAnswerSharing)
+            {
+                var parentAnswer = parentElement.firstChild.firstChild;
+                while (parentAnswer)
+                {
+                    if (parentAnswer.nodeName.toLowerCase() === "div")
+                    {
+                        addShareIcon(parentAnswer);
+                    }
+                    parentAnswer = parentAnswer.nextSibling;
+                }
+            }
+        }
+        else // web results
+        {
+            addShareIcon(parentElement);
+        }
+    }
+
+    var addShareIcon = function (element)
+    {
+        // bail out if element doesn't exist
+        if (!element) 
+        {
+            return;
+        }
+        
+        // get h3/h2 tag element
+        var elementClass = element.className;
+        var elementHeading = directParentNodes[elementClass] ? element : element.querySelector("h3");
+        elementHeading = elementHeading ? elementHeading : element.querySelector("h2");
+    
+        // fix to avoid double news sharing icons to be populated - 492472
+        if (elementHeading && !skipLowerAnswerNodes[elementClass])
+        {
+            var shareTitle = elementHeading ? elementHeading.querySelector("a") : null;
+            if (shareTitle)
+            {
+                // Trying to search for an existing container assuming redundant markup bug hasn't been fixed yet
+                // Handling different HTML DOM structure for weather answer - 495302
+                var parentContainer = directParentNodes[elementClass] ? elementHeading.parentNode : elementHeading.parentNode.parentNode;
+                var shareIconContainer = element.querySelector("." + shareIconContainerClassName);
+                if (!shareIconContainer)
+                {
+                    shareIconContainer = sj_ce("div", 0, shareIconContainerClassName);
+                    parentContainer.insertBefore(shareIconContainer, parentContainer.firstChild);
+                }
+                
+                var shareIcon = sj_ce("a", 0, shareIconClassName);
+                shareIcon.href = "#"; // if nothing is included in the href IE doesn't seem to respect return false in onclick and navigates to current page anyway
+                shareIcon.title = "Add this link to your comment";
+                shareIcon.spLink = shareTitle.href;
+                shareIcon.spTitle = shareTitle.innerText || shareTitle.textContent;
+                shareIcon.spID = shareIcons.length;
+                shareIcon.onclick = function (evt) { if (this) sj_evt.fire("sp.conv_addlink", { id: this.spID, url: this.spLink, title: this.spTitle }); sj_pd(evt); return false };
+                shareIcon.onmousedown = function () { if (this) this.className = shareIconActiveClassName; };
+                shareIcon.onmouseup = function () { if (this) this.className = shareIconClassName; };
+                shareIconContainer.insertBefore(shareIcon, shareIconContainer.firstChild);
+                shareIcons.push(shareIcon);
+            }
+        }
+    };
+
+    var showShareIcons = function ()
+    {
+        // wireup algos when the feature is activated
+        wireUp();
+        
+        toggleShareIcons(true);
+    };
+
+    var hideShareIcons = function ()
+    {
+        toggleShareIcons(false);
+    };
+	
+    function getNumericWidth(e) {
+        return parseFloat((_w.getComputedStyle ? _w.getComputedStyle(e) : e.currentStyle)["width"]);
+    }
+
+    var animIcon = function (e, isShow, duration) {
+        var anim,
+            ew,
+            stepcount,
+            increment,
+            animatorText = "animator";
+
+        function updateFunc(e, step) {
+            e.style.width = Math.round(ew + increment * step) + "px";
+        }
+
+        function endCallback() {
+            if (e[animatorText] === anim)
+                delete e[animatorText];
+        }
+
+        if (anim = e[animatorText]) {
+            anim.stop();
+        }
+
+        if (isNaN(ew = getNumericWidth(e)))
+            return;
+
+        stepcount = duration / 25;
+        increment = ((isShow ? iconWidth : 0) - ew) / stepcount;
+
+        e[animatorText] = anim = new sj_anim(updateFunc);
+
+        anim.init(e, 0, stepcount, 1, endCallback);
+    };
+
+    var toggleShareIcons = function (isVisible)
+    {
+        var nextIconIndexToAnimate = 0;
+        var animationDuration = 150;
+        var nextAnimationDelay = 33; //16.7*2
+        var timer;
+
+        var animateNext = function ()
+        {
+            timer && sb_ct(timer);
+            animIcon(
+                    shareIcons[nextIconIndexToAnimate],
+                    isVisible,
+                    animationDuration);
+
+            if (++nextIconIndexToAnimate < shareIcons.length)
+            {
+               timer = sb_st(animateNext, nextAnimationDelay);
+            }
+        };
+
+        shareIcons.length > 0 && animateNext();
+    };
+    
+    // self-initialization code
+    init();
+
+})();

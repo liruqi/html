@@ -1,0 +1,267 @@
+///<reference path="..\Declarations\Shared.d.ts" />
+///<reference path="..\Declarations\Touch.d.ts" />
+var Swipe;
+(function (Swipe) {
+    var SwipeData = (function () {
+        function SwipeData() {
+            this.start = null;
+            this.total = { pageX: 0, pageY: 0, clientX: 0, clientY: 0 };
+            this.lastUpdate = null;
+            this.speed = 0;
+        }
+        return SwipeData;
+    }());
+    var msGesture = _w["MSGestureEvent"] && _w["MSGesture"];
+    var isTouchBroken = isAndroidAndOldChrome();
+    // get the qualified touch for the swiping event
+    function getTouch(evt) {
+        var touch = null;
+        if ('touches' in evt) {
+            var te = evt;
+            var touches = te.targetTouches;
+            if (touches && touches.length == 1) {
+                touch = { pageX: touches[0].pageX, pageY: touches[0].pageY };
+            }
+        }
+        else if (msGesture) {
+            var ge = evt;
+            // MSGestureEvent doesn't support pageX/Y, simulate with clientX/Y
+            touch = { pageX: ge.clientX, pageY: ge.clientY };
+        }
+        else {
+            var me = evt;
+            touch = { pageX: me.pageX, pageY: me.pageY };
+        }
+        if (touch != null) {
+            touch.pageY += _w.pageYOffset;
+        }
+        return touch;
+    }
+    // check if having selection
+    function checkSelection(clear) {
+        var name = "getSelection";
+        var func = _w[name] || _d[name];
+        var txt = '';
+        if (func) {
+            var sel = func();
+            txt += func();
+            if (clear) {
+                sel.removeAllRanges();
+            }
+        }
+        else if (_d["selection"]) {
+            var sele = _d["selection"];
+            txt += sele.createRange().text;
+            if (clear && sele.empty) {
+                sele.empty();
+            }
+        }
+        return !!txt;
+    }
+    function StopEffect(evt) {
+        // prevent default and disallow document select effect on click
+        sj_pd(evt);
+        checkSelection(true);
+    }
+    Swipe.StopEffect = StopEffect;
+    /*
+        simple API to support hooking callbacks for swiping events on specific HTML element when touch screen is supported
+        some browsers doesn't support touch events, we fallback to mouse events to support, so it should work for all major browsers Chrome, Safari, Firefox and IE
+        Parameters:
+            left        - callback for swiping to left gesture
+            right       - callback for swiping to right gesture
+            element     - the HTML element of touch gesture happens, default to page body
+            threshold   - distance on x axis of a qualified gesture, default to 50px
+            move       - callback for swiping to move gesture
+            noop       - callback for swiping with neither left nor right triggered
+            startHandler - callback for swiping is started
+            forceNativeSwiping - indicates whether we should not work around a touch buug in Android. With this buug, only one touchmove event is fired, which
+                       means you can't get smooth swipe experience. The work around is, prevent default handler for touchstart then continuous touchmove
+                       events will be sent out. The drawback is, the click event won't fire by Android, but we also have a workaround to simulate the click.
+                       see http://stackoverflow.com/questions/11204460/the-touchmove-event-on-android-system-transformer-prime for more information
+            preventScrollingVertically - prevent scrolling vertically if the intension is to swipe horizontally
+            minimumSwipeDistanceRatio - treat as horizontal swipe only when the swipe distance of x/y > minimuSwipeDistanceRatio
+    */
+    function OnSwipe(left, right, element, threshold, move, noop, startHandler, forceNativeSwiping, preventScrollingVertically, minimumSwipeDistanceRatio) {
+        if (element === void 0) { element = _d.body; }
+        if (threshold === void 0) { threshold = 50; }
+        if (move === void 0) { move = function (x, y) { }; }
+        if (noop === void 0) { noop = function (speed) { }; }
+        if (startHandler === void 0) { startHandler = function () { }; }
+        if (forceNativeSwiping === void 0) { forceNativeSwiping = false; }
+        if (preventScrollingVertically === void 0) { preventScrollingVertically = false; }
+        if (minimumSwipeDistanceRatio === void 0) { minimumSwipeDistanceRatio = 2; }
+        minimumSwipeDistanceRatio = Math.max(minimumSwipeDistanceRatio, 2);
+        var swipeData = new SwipeData();
+        var gesture = null;
+        var startEvent = "touchstart";
+        var moveEvent = "touchmove";
+        var endEvent = "touchend";
+        var outEvent = "touchout";
+        var useNativeSwiping = forceNativeSwiping || !isTouchBroken;
+        if ('ontouchstart' in _d.documentElement) {
+            // supported in most mobile and touch browsers
+            startEvent = "touchstart";
+            moveEvent = "touchmove";
+            endEvent = "touchend";
+            outEvent = "touchout";
+        }
+        else if (msGesture) {
+            gesture = new MSGesture();
+            gesture.target = element;
+            //disable default touch-action css in order for the gesture event to be captured
+            element.style.msTouchAction = "none";
+            element.style.touchAction = "none";
+            var hasPointer = !!_w["PointerEvent"];
+            startEvent = hasPointer ? "pointerdown" : "MSPointerDown";
+            moveEvent = "MSGestureChange";
+            endEvent = hasPointer ? "pointerup" : "MSPointerUp";
+            outEvent = hasPointer ? "pointerout" : "MSPointerOut";
+        }
+        // touch start handler
+        var startEventHandler = function (evt) {
+            if (msGesture && evt["pointerId"]) {
+                // disable mouse dragging on IE11
+                if (evt["pointerType"] != 'touch') {
+                    return;
+                }
+                gesture.addPointer(evt["pointerId"]);
+            }
+            swipeData.start = getTouch(evt);
+            if (!swipeData.start) {
+                return;
+            }
+            swipeData.lastUpdate = swipeData.start;
+            swipeData.speed = 0;
+            swipeData.lastTime = new Date().getTime();
+            if (!useNativeSwiping) {
+                if (evt.preventDefault)
+                    evt.preventDefault();
+            }
+            startHandler && startHandler();
+            Log.Log("Start", "Swipe", evt.type, true);
+            sj_sp(evt);
+        };
+        sj_be(element, startEvent, startEventHandler);
+        // touch move handler
+        var moveEventHandler = function (evt) {
+            if (swipeData.lastUpdate == null || swipeData.start == null)
+                return; // move is not valid if not even started
+            var update = getTouch(evt);
+            if (swipeData.start !== null && update != null) {
+                var offsetX = update.pageX - swipeData.start.pageX;
+                var offsetY = update.pageY - swipeData.start.pageY;
+                if (preventScrollingVertically) {
+                    if (Math.abs(offsetY) > Math.abs(offsetX) * 2) {
+                        // scrolling up and down
+                        return;
+                    }
+                    else {
+                        // prevent page scrolling up or down
+                        if (evt.preventDefault)
+                            evt.preventDefault();
+                    }
+                }
+                // offset taking affect
+                swipeData.total.pageX = offsetX;
+                swipeData.total.pageY = offsetY;
+                if (move) {
+                    var deltaX = update.pageX - swipeData.lastUpdate.pageX;
+                    var deltaY = update.pageY - swipeData.lastUpdate.pageY;
+                    move(deltaX, deltaY);
+                    var nowTime = new Date().getTime();
+                    swipeData.speed = deltaX / (nowTime - swipeData.lastTime);
+                    swipeData.lastUpdate = update;
+                }
+            }
+            sj_sp(evt);
+        };
+        sj_be(element, moveEvent, moveEventHandler);
+        // touch end handler
+        var onSwipeEnd = function (evt) {
+            if (swipeData.start !== null && !checkSelection(false)) {
+                var xDelta = Math.abs(swipeData.total.pageX);
+                // Windows mobile edge will send two mspointerout events, the first one is before the touchmove, which results 0 xDelta
+                // Android, when working around the touchmove buug by preventDefaults, while the intent is touch click, would result zero delta because of consecutive touchstart and touchend, without touchmove. We should not ignore this touchend.
+                if (xDelta == 0) {
+                    if (!useNativeSwiping) {
+                        // since it is android with buug workaround, we should not ignore this touchend event
+                    }
+                    else {
+                        return; // ignore this swipe end event for windows mobile edge
+                    }
+                }
+                // when prevent scrolling vertically, while the touch is outside of the control, we can't ignore the swipe when xDelta > Math.abs(total.pageY) * minimuSwipeDistanceRatio
+                if (xDelta >= threshold && (xDelta > Math.abs(swipeData.total.pageY) * minimumSwipeDistanceRatio || preventScrollingVertically)) {
+                    // swipe right
+                    if (swipeData.total.pageX < 0 && right) {
+                        right(swipeData.speed);
+                    }
+                    // swipe left
+                    if (swipeData.total.pageX > 0 && left) {
+                        left(swipeData.speed);
+                    }
+                }
+                else {
+                    // on Android, if the touch is small, we regard it as click
+                    if (!useNativeSwiping && xDelta <= 5 && Math.abs(swipeData.total.pageY) <= 5) {
+                        var target = evt.target;
+                        if (_d && _d.createEvent) {
+                            var event = _d.createEvent("HTMLEvents");
+                            event.initEvent("click", true, true);
+                            target.dispatchEvent(event);
+                        }
+                        target.click && target.click();
+                    }
+                    else {
+                        noop && noop(swipeData.speed);
+                    }
+                }
+                Log.Log("End", "Swipe", evt.type, true, "PX", swipeData.total.pageX.toString(), "PY", swipeData.total.pageY.toString());
+            }
+            // reset anyways
+            swipeData.start = null;
+            swipeData.total.pageX = 0;
+            swipeData.total.pageY = 0;
+            swipeData.speed = 0;
+            sj_sp(evt);
+        };
+        // need to end swiping when touch is moved out of control, or the touch will never end
+        sj_be(element, outEvent, onSwipeEnd);
+        sj_be(element, endEvent, onSwipeEnd);
+    }
+    Swipe.OnSwipe = OnSwipe;
+    function matchUA(regex) {
+        return navigator.userAgent.match(regex);
+    }
+    function getChromeVersion() {
+        var result = -1;
+        try {
+            var chromeUARegex = /Chrome\/(\d+).*/i;
+            var match = chromeUARegex.exec(navigator.userAgent);
+            if (match && match[1]) {
+                result = parseInt(match[1]);
+            }
+        }
+        catch (e) {
+            result = -1;
+        }
+        return result;
+    }
+    function isAndroidAndOldChrome() {
+        // On Android phones the touchmove event only fire ONCE
+        // So we need this logic to fix the behavior
+        // The side effect is that we need to handle the vertical
+        // scroll manually
+        // See http://stackoverflow.com/questions/11204460/the-touchmove-event-on-android-system-transformer-prime for more information
+        if (matchUA(/Android/i)) {
+            // chromeVersion == -1 if the current browser is not chrome
+            // we don't need this fix on Chrome >= 37
+            var chromeVersion = getChromeVersion();
+            if (chromeVersion <= 36) {
+                return true;
+            }
+        }
+        return false;
+    }
+})(Swipe || (Swipe = {}));

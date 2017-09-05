@@ -1,0 +1,88 @@
+// This script is rendered along-side the identity control in the first chunk of the page.
+
+// Namespace for shared Identity functions:
+var Identity = Identity || {};
+
+(function (decode, customEvents, bindBrowserEvent, browserWindow, getElement, encode, identityNamespace, rtl) {
+    // Public function that allows any other JavaScript to access details about the currently
+    // authenticated Windows Live user.
+    identityNamespace.wlProfile = function () {
+        // TFS 604826 - Remove dependence on FBS and WLS cookies for SnR Identity Control
+        var getCookie = sj_cook.get;
+        var wlSessionCookie = "WLS",
+            displayName = getCookie(wlSessionCookie, "N"),
+            cid = getCookie(wlSessionCookie, "C");
+        if (displayName && cid && identityNamespace.wlImgSm && identityNamespace.wlImgLg) {
+            return {
+                displayName: decode(displayName.replace(/\+/g, " ")),
+                name: decode(displayName.replace(/\+/g, " ")),
+                img: identityNamespace.wlImgSm.replace(/\{0\}/g, encode(cid)),
+                imgL: identityNamespace.wlImgLg.replace(/\{0\}/g, encode(cid)),
+                idp: "WL"
+            };
+        }
+
+        // Return null when there is no authenticated Windows Live user
+        return null;
+    };
+
+    // Public property that allows external JavaScript to influence the UI method used for Windows Live login:
+    // 0 = Full page redirect
+    // 1 = Popup window
+    identityNamespace.headerLoginMode = 0;
+
+    // Public function that is called by external JavaScript to authenticate a user to an IDP without leaving
+    // the current page.
+    //
+    // The caller is respnosible for determining that the user is not already authetnicated before calling this
+    // method (e.g. by calling Identity.wlProfile() and checking for a null return value).
+    //
+    // The identityProviderId parameter contains the ID of the IDP that the user should be authenticated to.
+    identityNamespace.popupAuthenticate = function (identityProviderId, permissions, loginSource) {
+        var popupUrls, popupUrl, popupWindow, timer;
+        return (popupUrls = identityNamespace.popupLoginUrls) &&
+            (popupUrl = popupUrls[identityProviderId] + (permissions ? "&perms=" + encode(permissions) : "") + (loginSource ? "&src=" + encode(loginSource) : "")) &&
+            (popupWindow = identityNamespace.pop(popupUrl)) &&
+            (timer = setInterval(function () { if (popupWindow.closed) { customEvents.fire("id:popup:close"); clearInterval(timer); } }, 100));
+    };
+
+    // Private function to load a URL in a popup window.
+    identityNamespace.pop = function (popupUrl) {
+        return browserWindow.open(popupUrl, "idl" /*window ID*/, "location=no,menubar=no,resizable=no,scrollbars=yes,status=no,titlebar=no,toolbar=no,width=1000,height=620");
+    };
+
+    var yOffset = 0; // size of the reserved space at top of window (e.g. for SERP toast)
+    var id_h = getElement("id_h"); // ID header
+    var id_l = getElement("id_l"); // login button
+
+    // Assign all string literals that are used more than once to a local variable to facilitate crunching:
+    var evtClick = "click";
+
+    customEvents.bind(
+        "onP1", // On page load...
+        function () {
+            setTimeout(
+                function () {
+                    // Trigger download of identity dropdown JS.
+                    if (id_h && id_l) {
+                        sj_jb(
+                            "Blue/BlueIdentityDropdown_c",  // Delay load identity bootstrap JS ...
+                            0,                              // ... (which is not served by FrontDoor) ...
+                            id_h, "mouseover",              // ... whenever the identity header is moused-over ...
+                            id_l, evtClick,                 // ... or whenever the login button is clicked ...
+                            id_l, "focus"                   // ... or whenever the login button receives focus by the user pressing tab ...
+                            );
+                        bindBrowserEvent(id_l, evtClick, function (e) { identityNamespace.hdrClk = e; });
+                    }
+                    if (id_h) {
+                        id_h.style.display = "block";
+                        sj_evt.fire('identityHeaderShown');
+                    }
+                },
+                50 /*wait 50ms after onP1 so as not to interfere with PerfPing*/
+                );
+        },
+        1 // Enable retroactive event binding
+    );
+
+})(decodeURIComponent, sj_evt, sj_be, _w, _ge, encodeURIComponent, Identity, _G.RTL);

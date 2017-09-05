@@ -1,0 +1,124 @@
+/* Chevrons */
+///<reference path="declarations\Shared.d.ts" />
+///<reference path="declarations\CssClass.d.ts" />
+var Chevrons;
+(function (Chevrons_1) {
+    // const
+    var disabledClassName = "disabled";
+    var hiddenClassName = "hidden";
+    var darkChevronClassName = "darkchv";
+    var Chevrons = (function () {
+        function Chevrons(controlId, prevSlideBtn, nextSlideBtn) {
+            var _this = this;
+            this.controlId = controlId;
+            this.prevSlideBtn = prevSlideBtn;
+            this.nextSlideBtn = nextSlideBtn;
+            this.onPrevClick(function () { sj_evt.fire("slideexp_slideprev", _this.controlId); Log.Log("Prev", "SlideExp", "Chevron"); });
+            this.onNextClick(function () { sj_evt.fire("slideexp_slidenext", _this.controlId); Log.Log("Next", "SlideExp", "Chevron"); });
+            this.onMouseOver(function () { sj_evt.fire("slideexp_pauseautoslide", _this.controlId); });
+            this.onMouseOut(function () { sj_evt.fire("slideexp_resumeautoslide", _this.controlId); });
+            sj_evt.bind("slideexp_leftmost", function (args) { if (!_this.isForMe(args))
+                return; _this.disablePrev(true); _this.disableNext(false); });
+            sj_evt.bind("slideexp_rightmost", function (args) { if (!_this.isForMe(args))
+                return; _this.disablePrev(false); _this.disableNext(true); });
+            sj_evt.bind("slideexp_middle", function (args) { if (!_this.isForMe(args))
+                return; _this.disablePrev(false); _this.disableNext(false); });
+            sj_evt.bind("slideexp_leftrightmost", function (args) { if (!_this.isForMe(args))
+                return; _this.disablePrev(true); _this.disableNext(true); });
+            sj_evt.bind("slideexp_mouseover_show", function (args) { if (!_this.isForMe(args))
+                return; _this.show(); });
+            sj_evt.bind("slideexp_mouseout_hide", function (args) { if (!_this.isForMe(args))
+                return; _this.hide(); });
+            sj_evt.bind("slideexp_mouseover_dark", function (args) { if (!_this.isForMe(args))
+                return; _this.changToDark(); });
+            sj_evt.bind("slideexp_mouseout_light", function (args) { if (!_this.isForMe(args))
+                return; _this.changToLight(); });
+        }
+        Chevrons.prototype.onPrevClick = function (prevClick) {
+            if (this.prevSlideBtn == null || this.nextSlideBtn == null)
+                return;
+            prevClick && sj_be(this.prevSlideBtn, "click", prevClick);
+        };
+        Chevrons.prototype.onNextClick = function (nextClick) {
+            if (this.prevSlideBtn == null || this.nextSlideBtn == null)
+                return;
+            nextClick && sj_be(this.nextSlideBtn, "click", nextClick);
+        };
+        Chevrons.prototype.onMouseOver = function (mouseover) {
+            if (this.prevSlideBtn == null || this.nextSlideBtn == null)
+                return;
+            if (!mouseover)
+                return;
+            sj_be(this.prevSlideBtn, "mouseover", mouseover);
+            sj_be(this.nextSlideBtn, "mouseover", mouseover);
+        };
+        Chevrons.prototype.onMouseOut = function (mouseout) {
+            if (this.prevSlideBtn == null || this.nextSlideBtn == null)
+                return;
+            if (!mouseout)
+                return;
+            sj_be(this.prevSlideBtn, "mouseout", mouseout);
+            sj_be(this.nextSlideBtn, "mouseout", mouseout);
+        };
+        Chevrons.prototype.show = function () {
+            this.setHidden(false);
+        };
+        Chevrons.prototype.changToDark = function () {
+            if (this.prevSlideBtn == null)
+                return;
+            if (this.nextSlideBtn == null)
+                return;
+            Lib.CssClass.add(this.prevSlideBtn, darkChevronClassName);
+            Lib.CssClass.add(this.nextSlideBtn, darkChevronClassName);
+        };
+        Chevrons.prototype.hide = function () {
+            this.setHidden(true);
+        };
+        Chevrons.prototype.changToLight = function () {
+            if (this.prevSlideBtn == null)
+                return;
+            if (this.nextSlideBtn == null)
+                return;
+            Lib.CssClass.remove(this.prevSlideBtn, darkChevronClassName);
+            Lib.CssClass.remove(this.nextSlideBtn, darkChevronClassName);
+        };
+        Chevrons.prototype.disablePrev = function (prevDisabled) {
+            if (this.prevSlideBtn == null)
+                return;
+            this.updateClassIf(this.prevSlideBtn, prevDisabled, disabledClassName);
+        };
+        Chevrons.prototype.disableNext = function (nextDisabled) {
+            if (this.nextSlideBtn == null)
+                return;
+            this.updateClassIf(this.nextSlideBtn, nextDisabled, disabledClassName);
+        };
+        Chevrons.prototype.setHidden = function (hidden) {
+            if (this.prevSlideBtn == null)
+                return;
+            if (this.nextSlideBtn == null)
+                return;
+            this.updateClassIf(this.prevSlideBtn, hidden, hiddenClassName);
+            this.updateClassIf(this.nextSlideBtn, hidden, hiddenClassName);
+        };
+        Chevrons.prototype.updateClassIf = function (element, condition, className) {
+            if (condition) {
+                Lib.CssClass.add(element, className);
+            }
+            else {
+                Lib.CssClass.remove(element, className);
+            }
+        };
+        // args[0]: event name
+        // args[1]: event target id
+        Chevrons.prototype.isForMe = function (args) {
+            return args[1] === this.controlId;
+        };
+        return Chevrons;
+    }());
+    function init(controlId, prevSlideBtn, nextSlideBtn) {
+        return new Chevrons(controlId, prevSlideBtn, nextSlideBtn);
+    }
+    Chevrons_1.init = init;
+    // notify that chevrons module is ready
+    sj_evt.fire("chevrons_init", Chevrons);
+})(Chevrons || (Chevrons = {}));

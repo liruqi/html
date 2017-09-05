@@ -1,0 +1,25 @@
+// Don't change this method name.  It's referenced/used in News Ajax refresh
+function RewardsReportActivity(url) {
+    var ajax = sj_gx();
+    var v = 'web';
+    var vE = _ge('sw_meFlt');
+    if (vE) {
+        v = vE.getAttribute("_V");
+    }
+    var postData = "url=" + escape(url) + "&V=" + v;
+    ajax.open("POST", "/rewardsapp/reportActivity", true);
+    ajax.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+
+    ajax.onreadystatechange = function () {
+        if (ajax && ajax.readyState == 4 && ajax.status == 200) {
+            // execute the script returned in a new scope to avoid leaking globals
+            new Function(ajax.responseText)();
+        }
+    }
+    ajax.send(postData);
+}
+
+(function () {
+    // report always. required for Ajax based Pages
+    RewardsReportActivity(document.URL);
+})();

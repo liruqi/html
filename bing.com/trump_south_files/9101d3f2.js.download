@@ -1,0 +1,1763 @@
+/*DisableJavascriptProfiler*/
+var BM = BM || {};
+BM.config = {
+    B: {
+        timeout: 250,
+        delay: 750,
+        maxUrlLength: 300,
+        sendlimit: 20
+    },
+    V: {
+        distance: 20
+    },
+    N: {
+        maxUrlLength: 300
+    },
+    E: {
+        buffer: 30,
+        timeout: 5000,
+        maxUrlLength: 300
+    },
+    C: {
+        distance: 50
+    }
+};
+;///<reference path="..\..\..\..\Shared\Content\Content\Script\Declarations\Shared.d.ts"/>
+///<reference path="config.ts"/>
+///<reference path="queue.ts"/>
+(function (BM) {
+    // Ensure that we do not run this script twice on page
+    // iPhone, on back button, appears to keep previous instance of Box Model in memory
+    // but still executes a duplicate copy and as a result we start seeing multiple Box Model
+    // payload being sent for same impression with different sequenceIds
+    if (_w["BM"] && BM.register)
+        return;
+    // Constants
+    var moduleID = "B";
+    var version = "v2.8";
+    var subversion = "4";
+    var emptyString = "";
+    var config = BM.config[moduleID];
+    var delay = config.delay;
+    var timeout = config.timeout;
+    var maxSendCount = config.sendlimit;
+    var supportPerformanceAPI = _w.performance && performance.now && performance.timing;
+    // Characters not escaped: - _ @ + * /
+    // Characters not escaped nor encoded: - _ *
+    var variableMarker = "@";
+    var delimiter = ["$", "+", "/", ":", ";"];
+    // Caching regex ahead of the time since this is the fastest way to manipulate strings
+    // Reference: http://jsperf.com/regexp-indexof-perf
+    var encodeStringRegex = /([%$+\/:;"])/g;
+    // crunchList tracks list of tokens that appear more than once in payload
+    // This is used to implement custom compression logic in absence of gzip
+    var crunchList;
+    // Shared variables
+    var boxmodel;
+    var modules = [];
+    var lastSnapshotData;
+    var queuedSnapshots;
+    var nextSnapshotTime;
+    var sendTimeoutHandler;
+    var crunchCounter;
+    var sendCount;
+    var initialized;
+    var defaultTrigger = "T";
+    var ajaxStart;
+    var state = 0 /* Created */;
+    function init() {
+        // Do no proceed any further if querySelector API is not available
+        // And, log this event to log service so we know the reason for missing Box Model data
+        // This will also help us identify cases where browser was misclassified by Edge / Frontdoor
+        if (!document.querySelector || !document.querySelectorAll) {
+            postError({ "FN": "init", "S": "QuerySelector" });
+            return;
+        }
+        // Reset shared variables
+        lastSnapshotData = {};
+        crunchList = [];
+        sendCount = 1;
+        crunchCounter = 0;
+        sendTimeoutHandler = 0;
+        queuedSnapshots = [];
+        nextSnapshotTime = 0;
+        initialized = false;
+        // Generating a random string to identify different instances of Box Model script on same page
+        // E.g. It is possible for two different instances of Box Model script execution to have same IG (in case of back button)
+        // where we may end up having two Box Model events with same sequence count.
+        var sequenceId = Math.floor(Math.random() * (10000)).toString(36);
+        boxmodel = {
+            P: { C: 0, N: 0, I: sequenceId, S: defaultTrigger, M: emptyString, T: 0, K: emptyString, F: 0 }
+        };
+        load();
+    }
+    function delta(original, update) {
+        var delta = {};
+        for (var key in original) {
+            if (key.indexOf("_") !== 0) {
+                if (key in update && (original[key] !== update[key] || key === "i")) {
+                    delta[key] = update[key];
+                    original[key] = update[key];
+                }
+                else {
+                    delta[key] = null;
+                }
+            }
+        }
+        return delta;
+    }
+    // Soft cloning that copies first level object on to a different object
+    // It is required so we can continue to maintain internal state of viewport, layout or any other module indepdent of BoxModel object
+    // This is intentionally not deep-cloning objects, which is a lot more
+    // computationally intensive and is not needed here.
+    function clone(source) {
+        var destination = {};
+        for (var key in source) {
+            if (source.hasOwnProperty(key)) {
+                destination[key] = source[key];
+            }
+        }
+        return destination;
+    }
+    // Trigger a snapshot with specified source and an optional parameter to force flush
+    // If no force argument is present, snapshot will be scheduled to go after configured delay
+    // By default, framework waits to see if there are more snapshots coming, and if so, batch them together
+    // This enables us to batch snapshots coming from different modules and limit traffic over the wire
+    function snapshot(source, force, wait) {
+        // If we attempt to send a snapshot before calling init function, bail out and log a Box Model error for debugging
+        if (!initialized) {
+            postError({ "FN": "snapshot", "S": source });
+            return;
+        }
+        ;
+        // By default, if delay is not specified take what is specified in the configuration
+        wait = wait || delay;
+        force = force || false;
+        // Compute time at which next snapshot should be triggered
+        var currentSnapshotTime = getTimestamp() + wait;
+        // If we don't already have a snapshot in queue for given source, push it to the end of queue
+        if (getIndex(queuedSnapshots, source) === -1)
+            queuedSnapshots.push(source);
+        // If this snapshot needs to be immediately flushed out, clear out any pending timers and send it out
+        if (force) {
+            clearTimeoutHandler();
+            send(force);
+        }
+        else if (currentSnapshotTime > nextSnapshotTime) {
+            clearTimeoutHandler();
+            sendTimeoutHandler = sb_st(send, wait);
+            nextSnapshotTime = currentSnapshotTime;
+        }
+    }
+    function postError(metadata) {
+        var data = {
+            "T": "CI.BoxModelError",
+            "FID": "CI",
+            "Name": version,
+            "SV": subversion,
+            "P": boxmodel && "P" in boxmodel ? stringify(boxmodel.P) : emptyString,
+            "TS": getElapsedTime(),
+            "ST": state
+        };
+        // Copy over metadata to payload before sending it back
+        for (var key in metadata) {
+            data[key] = metadata[key];
+        }
+        var payload = stringify(data);
+        postData(payload);
+    }
+    function clearTimeoutHandler() {
+        if (nextSnapshotTime > 0) {
+            sb_ct(sendTimeoutHandler);
+            nextSnapshotTime = 0;
+        }
+    }
+    function send(force) {
+        // If we attempt to send a snapshot before calling init function, bail out and log a Box Model error for debugging
+        if (!initialized) {
+            postError({ "FN": "send", "S": queuedSnapshots.join(delimiter[1]) });
+            return;
+        }
+        ;
+        // To prevent excessive upload we limit the maximum number of times we can send a snapshot back to server
+        // The only exception to this maximum threshold is if we are doing a forced send (e.g. in case of Unload event, of Page Visibility hidden state
+        // In that case, we want to send back whatever was already collected on the client and send one last payload back to the server
+        if (sendCount <= maxSendCount || force) {
+            // E.g. T: Timeout, E: External, S: Scroll, M: DOM Mutation, R: Resize, V: Visibility, H: Hidden, E: Error or U: Unload
+            // Since, we may have multiple triggers queued up, we are sending a flattened like like: T+S+U back to server
+            boxmodel.P.S = queuedSnapshots.join(delimiter[1]);
+            // Set the property to indicate if payload was flushed forcefully or not
+            boxmodel.P.F = force ? 1 : 0;
+            // List of registered modules
+            boxmodel.P.M = getRegisterdModules();
+            var start = getElapsedTime(); // start timestamp
+            // Re-compute the latest before sending payload to the server
+            recompute();
+            // Update elapsed time and send count
+            boxmodel.P.T = getElapsedTime();
+            boxmodel.P.N = sendCount++;
+            // Send logs and instrument cost of compression / serializing data
+            boxmodel.P.C += getElapsedTime() - start;
+            var data = compress(boxmodel);
+            // Reset cost
+            boxmodel.P.C = 0;
+            // Post data
+            postData(data);
+            // Clearout snapshot queue
+            queuedSnapshots = [];
+            nextSnapshotTime = 0;
+        }
+    }
+    function recompute() {
+        // Invoke compute method for all registered modules
+        if (initialized)
+            invokeModules("compute");
+    }
+    function postData(data) {
+        // Post data using Log2 library if it is already available on the page
+        if (exists(window, "Log2") && Log2.LogEvent && JSON) {
+            Log2.LogEvent("ClientInst", JSON.parse(data), null, null, null, null, null, null);
+        }
+        else {
+            var url = "/fd/ls/lsp.aspx";
+            var time = getTimestamp();
+            // if eventData contains the raw string "]]>", it'll end the CDATA section prematurely
+            var eventXML = "<E><T>Event.ClientInst</T><IG>" + _G.IG + "</IG><TS>" + time + "</TS>" +
+                "<D><![CDATA[[" + data.replace("]]>", "]]]]><![CDATA[>") + "]]]></D></E>";
+            var xml = "<ClientInstRequest><Events>" + eventXML + "</Events><STS>" + time + "</STS></ClientInstRequest>";
+            var request = sj_gx();
+            request.open("POST", url, true);
+            request.setRequestHeader("Content-Type", "text/xml");
+            request.send(xml);
+        }
+        // Fire an event with box model payload to enable extensibility
+        // Example consumers: testhooks, ajax serp
+        sj_evt.fire("BM", data);
+    }
+    function stringify(json) {
+        var str = emptyString;
+        // This simplified implementation assumes that the passed in JSON will be one level deep
+        // and is an alternative to JSON.stringify which is not supported in all browsers
+        // Example: {"FT":605,"NC":31,"LN":1869,"EN":1,"IF":0,"LE":0,"DM":0,"SC":0,"VS":0,"HS":0,"V":2,"C":1,"T":7524,"S":"T"}
+        for (var key in json) {
+            var value = json[key];
+            // Skip the key if this key resolves to empty string
+            if (value === emptyString)
+                continue;
+            var isNumber = typeof value === "number";
+            var quote = '"';
+            var wrapper = isNumber || value.indexOf("{") === 0 ? emptyString : quote;
+            str += quote + key + quote + ":" + wrapper + value + wrapper + ",";
+        }
+        return "{" + (str.length > 0 ? str.substr(0, str.length - 1) : emptyString) + "}";
+    }
+    function compress(json) {
+        var start = getElapsedTime(); // start timestamp
+        // This function compresses the response without losing any information
+        // At high level, this function breaks payload into tokens and any token that appears
+        // more than once is then stored in a crunchList and later referenced in actual payload
+        // This is a temporary object to keep count of token frequency
+        var crunchMap = {};
+        // Build structured Box Model object to be sent back to server
+        // Example:
+        //    "BM": {
+        //        "C": "17z*5eo*LI.b_algo*LI.b_ans*www.bing.com*img*object*Validation.Bundle*script*shareWebResults_c.source*SegmentFilters Blue$DropDown_c.source*blue$WebResultToolbox.source*MMRichHover_c.source*MMRichHoverInst_c.source*vthumb_c.source*VideoRichHover2_c.source*VideoRichHover_c.source*Rewards RewardsNcHeaderBootstrap_c.source*iframe",
+        //        "S": "0*0*@0*gf*@0*1mz*1",
+        //        "L": "ef/BODY//0/0/@0/1pi//@1*ef/NAV.b_scopebar/ID=SERP,5032.1/0/0/eq/u//@1*ef/H1.b_logo//h/18/21/t//@1*ef/DIV.b_searchboxForm//2s/14/fk/11//@1*5t0/4/javascript:void(0)/r4/0/4p/u//@1*ef/SPAN.sb_count//3c/33/40/u//@1*ef/SPAN.ftrB/ID=SERP,5332.1/7c/33/37/u//@1*ef/@2/ID=SERP,5116.1/2s/3x/fk/8t//@1*ef/@3/ID=SERP,5065.1/2s/cs/fk/5o//0*ef/@2/ID=SERP,5133.1/2s/ii/fk/30//0*ef/@2/ID=SERP,5147.1/2s/lk/fk/2j//0*ef/@2/ID=SERP,5159.1/2s/o5/fk/2j//0*ef/@2/ID=SERP,5171.1/2s/qq/fk/2j//0*ef/@3/ID=SERP,5399.1/2s/tb/fk/33//0*ef/@2/ID=SERP,5183.1/2s/wg/fk/2j//0*ef/@2/ID=SERP,5204.1/2s/z1/fk/30//0*ef/@2/ID=SERP,5216.1/2s/123/fk/2j//0*ef/@2/ID=SERP,5237.1/2s/14o/fk/3n//0*ef/@2/ID=SERP,5250.1/2s/18d/fk/2j//0*ef/@2/ID=SERP,5264.1/2s/1ay/fk/2j//0*ef/@2/ID=SERP,5276.1/2s/1dj/fk/2j//0*ef/@2/ID=SERP,5296.1/2s/1g4/fk/30//0*ef/@2/ID=SERP,5308.1/2s/1j6/fk/2j//0*ef/LI.b_pag/ID=SERP,5340.1/2s/1lr/fk/2q//0*ef/@3/ID=SERP,5424.1/j6/3x/cn/c9//0*ef/@3/ID=SERP,5442.1/j6/gb/cn/6p//0*ef/FOOTER.b_footer/ID=SERP,5466.1/0/1p3/@0/2w//0*ef/IMG#id_p//0/0/0/0//@1*ef/IMG#emb1//3d/eb/3c/1w//0*ef/IMG#emb2//6q/eb/3c/1w//0*ef/IMG#emb3//a3/eb/3c/1w//0*ef/IMG#emb4//dg/eb/3c/1w//0*ef/IMG#emb5//3d/169/2w/1m//0*ef/IMG.rms_img//jq/5d/32/32//@1",
+        //        "N": "@4/simg-sw_mg_l_4d_lg.png/css/fo/12*@4/cpt/@5/hd/1n*@4/Shared.Bundle/@8/hg/0*@4/th/@5/j4/0*@4/th/@5/j5/0*@4/@7/@6/j8/1*@4/@9/@6/ja/1*@4/@10/@6/jd/1*@4/@11/@6/jf/1*@4/@12/@6/ji/0*@4/@13/@6/jk/1*@4/@14/@6/jm/1*@4/@15/@6/jq/0*@4/@16/@6/jr/1*@4/@17/@6/l4/1*@4/@7/@8/la/1*@4/@9/@8/rh/0*@4/@10/@8/rj/1*@4/@11/@8/rp/1*@4/@12/@8/rv/0*@4/@13/@8/rx/0*@4/@14/@8/ry/1*@4/@15/@8/s1/0*@4/@16/@8/s4/1*@4/@17/@8/sf/1*@4/rewardsapp-ncheader/xmlhttprequest/sj/39*@4/ppt/@5/sv/1r*@4/fb-r/@18/vn/1*@4/Rewards Blue$RewardsIconBepBlue.source/@8/we/0*@4/Identity-WindowsLiveConnect_c.js/@8/118/0*login.live.com/login.srf/@18/1dx/20",
+        //        "E": "",
+        //        "D": ""
+        //    }
+        var data = { T: "CI.BoxModel", FID: "CI", Name: version, SV: subversion, P: emptyString };
+        // Pass 1: Serialize JSON for every module
+        var values = {};
+        for (var moduleID in json) {
+            if (moduleID === "P")
+                continue;
+            var serialized = serialize(json[moduleID]);
+            if (serialized && serialized.length > 0) {
+                values[moduleID] = serialized.split(variableMarker);
+            }
+        }
+        // Multiple iterations of box model build crunchList incrementally and crunchCounter keeps
+        // track of tokens that we have already sent back to the server in previous log request.
+        // The down side here is that we lose a log service request in between, we won't be able to reconstruct payload
+        var crunchedKeys = crunchList.slice(crunchCounter).join(delimiter[1]);
+        crunchCounter = crunchList.length;
+        // Send back new crunched tokens if we have any new ones for this snapshot
+        boxmodel.P.K = crunchedKeys;
+        // Pass 2: Crunch tokens
+        // Walk through every token and see if it's already present in crunchList.
+        // If so, replace it with a reference pointer to crunchList instead of repeating the string
+        // Example: "ef/BODY//0/0/@0/1pi//@1*ef/@2/ID=SERP,5133.1/2s/ii/fk/30//0*ef/@2/ID=SERP,5147.1/2s/lk/fk/2j//0*ef"
+        for (var moduleID in values) {
+            // Crunch tokens
+            if (moduleID !== "M") {
+                for (var i = 0; i < values[moduleID].length; i++) {
+                    var value = values[moduleID][i];
+                    var crunchIndex = getIndex(crunchList, value);
+                    if (crunchIndex >= 0) {
+                        values[moduleID][i] = variableMarker + crunchIndex.toString(36);
+                    }
+                }
+            }
+            // Get crunched serialized value
+            var strData = values[moduleID].join(emptyString);
+            // Only send data for this module back to server if it has changed from last time and following rules apply:
+            //   a. If a module's information is unchanged relative to the prior snapshot, we do not send it.
+            //   b. If a module's property value (top-level JSON property for a module) is unchanged since the prior snapshot, we do not send it.
+            //   c. If a module's value represents an accumulating list we only send new elements in this snapshot; they are appended. Example: network events, errors in validation module, etc.
+            if (!(moduleID in lastSnapshotData) || lastSnapshotData[moduleID] !== strData) {
+                data[moduleID] = lastSnapshotData[moduleID] = strData;
+            }
+        }
+        // Update cost of compressing the payload
+        boxmodel.P.C += getElapsedTime() - start;
+        data.P = stringify(boxmodel.P);
+        return stringify(data);
+        // Serialize function recursively walks through the JSON object and converts it into string
+        // tokens that are delimited by "@" (variableMarker) sign and in the process also identifies
+        // tokens that can be crunched.
+        // Example:
+        //   Serialized string: S@!@17z@*@dv@*@1@!@L@!@ef@/@BODY@/@@/@0@/@0@/@17z@/@1pi@/@@/@5eo@*@ef@/@LI.b_algo@/@ID=SERP,5133.1@/@2s@/@ii@/@fk@/@30@/@@/@0@*@ef@/@LI.b_algo@/@ID=SERP,5147.1@/@2s@/@lk@/@fk@/@2j@/@@/@0@*@ef@
+        //   Token Array: ["S","!","17z","*","dv","*","1","!","L","!","ef","/","BODY","/","","/","0","/","0","/","17z","/","1pi","/","","/","5eo","*","ef","/","LI.b_algo","/","ID=SERP,5133.1","/","2s","/","ii","/","fk","/","30","/","","/","0","*","ef","/","LI.b_algo","/","ID=SERP,5147.1","/","2s","/","lk","/","fk","/","2j","/","","/","0","*","ef"]
+        //   Crunched List: ["17z", "5eo", "LI.b_algo", "LI.b_ans", "www.bing.com", "img", "object"]
+        function serialize(json, level, name) {
+            // isLeaf tracks if current level is flat structure without any object nesting
+            // E.g. isLeaf will be true for an object like: {"Key": "Value", "Metric": 12}
+            //      However, it won't be true for an object like: {"Key": "Value", "Layout": { "MoreKeys": "String" } }
+            var isLeaf = true;
+            // Temporary array to manage tokens as we find them in JSON payload
+            var values = [];
+            // Default nesting level to 1 if it isn't specified
+            level = level || 1;
+            // Skip over JSON object if it has already been consumed earlier or it's first child object of root JSON object (level === 2).
+            // _c tracks if this object has already been sent back to server. If so, we do not want to resend same data again.
+            // Second level objects represents "C", "N", "L" properties of Box Model object and we need to send them with every request
+            if (!("_c" in json) || level <= 1) {
+                for (var property in json) {
+                    var value = json[property];
+                    var token;
+                    var captureName = property.charCodeAt(0) >= 65 && property.charCodeAt(0) <= 90;
+                    // If property name begins with an uppercase character then
+                    // automtically log the property name too.
+                    if (captureName)
+                        values.push(property);
+                    // If we come across an internal property, starting with an underscore, skip over it.
+                    // These properties are only used for internal state management, not to be sent back to server
+                    if (property.indexOf("_") === 0) {
+                        continue;
+                    }
+                    else if (typeof value === "number") {
+                        token = parseInt(value.toString()).toString(36);
+                        values.push(token);
+                        buildCrunchList(token);
+                    }
+                    else if (typeof value === "string") {
+                        token = encode(value);
+                        values.push(token);
+                        buildCrunchList(token);
+                    }
+                    else if (value == null) {
+                        values.push(emptyString);
+                    }
+                    else if (typeof value === "object") {
+                        // If there's a nested object then call serialize again on it so we can serialize
+                        // child object and merge it with parent tokens
+                        var serialized = serialize(value, level + 1, property);
+                        if (serialized && serialized.length > 0 || captureName) {
+                            values.push(serialized);
+                        }
+                        // If we ever encounter an object within current JSON, mark isRootLevel as false
+                        isLeaf = false;
+                    }
+                }
+                if (isLeaf) {
+                    // If it is a root level object, we just finished serializing it and we should
+                    // not serialize it again unless someone explicitly resets consumed flag
+                    json["_c"] = true;
+                }
+            }
+            // Encode only special characters that we use for delimiting payload
+            // We do not need to encode all of the string because it would add extra bytes
+            // E.g. Input: LI#b_algo,http://www.bing.com/ (30 bytes)
+            // EncodeURIComponent Output: LI%23b_algo%2Chttp%3A%2F%2Fwww.bing.com%2F (47 bytes)
+            // Custom Encoding Output: LI#b_algo,http:%2F%2Fwww.bing.com%2F (36 bytes) (we do not encode [#,:] in this case)
+            function encode(str) {
+                return str.replace(encodeStringRegex, encodeURIComponent);
+            }
+            // Choose delimiter based off on current level in JSON.
+            // Choosing different delimiter for different level helps in reconstructing payload and it's nesting
+            // without using extra markers
+            var currentDelimiter = delimiter[level];
+            var output = values.join(variableMarker + currentDelimiter + variableMarker);
+            // Return serialized output
+            return output;
+        }
+        function buildCrunchList(token) {
+            // If a token repeats more than once, add it to crunchList
+            if (token.length > 2) {
+                if (token in crunchMap && getIndex(crunchList, token) === -1) {
+                    crunchList.push(token);
+                }
+                else
+                    crunchMap[token] = 1;
+            }
+        }
+    }
+    function getIndex(array, value) {
+        // Alternate implementation to .indexOf() since IE8 doesn't support indexOf on arrays
+        for (var i = 0; i < array.length; i++) {
+            if (array[i] === value)
+                return i;
+        }
+        return -1;
+    }
+    function getElapsedTime() {
+        return ajaxStart ? getTimestamp() - ajaxStart : (supportPerformanceAPI ? getNumber(performance.now()) : (new Date()) - window["si_ST"]);
+    }
+    function getTimestamp() {
+        return supportPerformanceAPI ? getNumber(performance.now() + performance.timing.navigationStart) : (new Date()).getTime();
+    }
+    function exists(variable, field) {
+        return (typeof variable[field] !== "undefined");
+    }
+    function getNumber(num) {
+        return num < -1 ? -1 : parseInt(num);
+    }
+    // When Ajax framework signals "ajax.unload", remember that timestamp and wait for the 
+    // "ajax.load" signal to make sure Ajax framework executed sucessfully
+    // On "ajax.load" use memorized timestamp as the starting reference point for the impression
+    function markAjaxStart() {
+        var ajaxUnloadTs = getTimestamp();
+        function ajaxLoaded() {
+            ajaxStart = ajaxUnloadTs;
+            sj_evt.unbind("ajax.load", ajaxLoaded);
+        }
+        sj_evt.bind("ajax.load", ajaxLoaded, false);
+    }
+    function load() {
+        state = 1 /* Loading */;
+        var start = getElapsedTime(); // start timestamp
+        initialized = true; // Update internal variable to reflect initialized state for Box Model framework
+        // Invoke wireup method for all registered modules
+        // We need to set initialized variable & call compute method before invoking load
+        // to ensure that Box Model is properly initialized in case there's a module that
+        // binds to a custom event, which in current implementation is synchronous, and leads to
+        // calling BM.snapshot().
+        invokeModules("load");
+        snapshot("T", false, timeout); // T: Timeout
+        boxmodel.P.C += getElapsedTime() - start;
+        // Framework tries to send any pending data one last time before navigating
+        // away from the current page. There's no guarantee that this payload will
+        // reach our server, however IE does seem to honor unload requests more often than not.
+        sj_be(window, "beforeunload", unload, false);
+        sj_evt.bind("unload", unload);
+        // Add an explicit event to unload BoxModel; used by testhooks visualization to unwire BoxModel without unloading the page
+        sj_evt.bind("BMU", unload);
+        state = 2 /* Loaded */;
+    }
+    function unload() {
+        state = 3 /* Unloading */;
+        sj_ue(window, "beforeunload", unload);
+        sj_evt.unbind("unload", unload);
+        sj_evt.unbind("BMU", unload);
+        snapshot("U", true); // U: Unload
+        initialized = false; // Update internal variable to reflect disabled state of Box Model framework
+        invokeModules("unload"); // Invoke reset method for all registered modules
+        state = 4 /* Unloaded */;
+    }
+    function invokeModules(fn) {
+        for (var i = 0; i < modules.length; i++) {
+            modules[i][fn](boxmodel);
+        }
+    }
+    function getRegisterdModules() {
+        var m = [];
+        for (var i = 0; i < modules.length; i++) {
+            m.push(modules[i].id);
+        }
+        return m.join(delimiter[1]);
+    }
+    function contains(moduleID) {
+        for (var i = 0; i < modules.length; i++) {
+            if (modules[i].id === moduleID)
+                return true;
+        }
+        return false;
+    }
+    function extend(m) {
+        var success = false;
+        if (!contains(m.id)) {
+            modules.push(m);
+            success = true;
+        }
+        return success;
+    }
+    function register(m) {
+        var success = false;
+        if (!contains(m.id) && m.check()) {
+            modules.push(m);
+            success = true;
+        }
+        return success;
+    }
+    // Take a Box Model snapshot immediately after page load
+    // This enables us to get a baseline that we can monitor against later
+    // We have to wrap the call to following function inside setTimeout(fn, 0)
+    // because both Android and iPhone do not parse the whole file before starting execution
+    // and as a result order of statements determine what gets executed first
+    // In this case, on mobile devices like Android & iPhone, since custom events are synchronous,
+    // we will fire the init function before waiting for modules further down in the bundle to register
+    // and therefore start calling "compute" method on modules without giving a chance to initialize themselves
+    function bind() {
+        sj_evt.bind("onP1", init, true);
+        sj_evt.bind("ajax.unload", markAjaxStart, true);
+        sj_evt.bind("ajax.postload", init, true);
+    }
+    sb_st(bind, 0);
+    // Exports
+    BM.extend = extend;
+    BM.register = register;
+    BM.snapshot = snapshot;
+    BM.delta = delta;
+    BM.clone = clone;
+    BM.exists = exists;
+    BM.time = getElapsedTime;
+    BM.error = postError;
+})(BM);
+;///<reference path="..\core.ts"/>
+///<reference path="metrics.ts"/>
+(function (BM) {
+    var moduleID = "V";
+    var devicePixelRatio;
+    var defaultTextSize;
+    var body;
+    var de;
+    var emptyString = "";
+    var defaultString = "default";
+    var visibilityState = "visibilityState";
+    var current;
+    var queue = [];
+    var distance = BM.config[moduleID].distance;
+    var de;
+    var bm;
+    var scrollDistance;
+    function load(boxmodel) {
+        boxmodel[moduleID] = [];
+        bm = boxmodel;
+        current = {};
+        current[moduleID] = {};
+        queue = [];
+        de = document.documentElement;
+        body = document.body;
+        devicePixelRatio = emptyString + devicePixelRatio; // Type cast number into a string
+        defaultTextSize = BM.exists(window, "getComputedStyle") ? parseInt(window["getComputedStyle"](document.body)["font-size"]) : -1;
+        defaultTextSize = defaultTextSize > 0 ? defaultTextSize : -1;
+        // Screen properties
+        // Using window.innerWidth / innerHeight for viewport size and if they are unavailable, fall back to de.clientWidth / clientHeight
+        // In most browsers both return the same value with exception of Cortana where window.innerHeight represents correct height of webview
+        var screenWidth = "innerWidth" in window ? window.innerWidth : de.clientWidth;
+        var screenHeight = "innerHeight" in window ? window.innerHeight : de.clientHeight;
+        var screenLeft = window["pageXOffset"] || de.scrollLeft;
+        var screenTop = window["pageYOffset"] || de.scrollTop;
+        var state = visibilityState in document ? document[visibilityState] : defaultString;
+        devicePixelRatio = BM.exists(window, "devicePixelRatio") ? window["devicePixelRatio"] : -1;
+        var currentViewport = { t: BM.time(), x: screenLeft, y: screenTop, w: screenWidth, h: screenHeight, dw: body.clientWidth, dh: body.clientHeight, d: devicePixelRatio, s: defaultTextSize, v: state, e: defaultString };
+        // Load viewport data from the queue
+        var viewportQueue = BM.dequeue("V");
+        // Append current viewport to the queue
+        viewportQueue.push({ t: currentViewport.t, i: currentViewport });
+        for (var i = 0; i < viewportQueue.length; i++) {
+            var item = viewportQueue[i];
+            var viewport = {
+                t: item.t,
+                x: item.i.x,
+                y: item.i.y,
+                w: item.i.w,
+                h: item.i.h,
+                dw: item.i.dw,
+                dh: item.i.dh,
+                d: devicePixelRatio,
+                s: defaultTextSize,
+                v: item.i.v,
+                e: defaultString
+            };
+            if (boxmodel[moduleID].length == 0) {
+                current[moduleID] = BM.clone(viewport);
+                boxmodel[moduleID].push(viewport);
+            }
+            else if (hasDelta(viewport)) {
+                boxmodel[moduleID].push(BM.delta(current[moduleID], viewport));
+            }
+        }
+        current[moduleID] = BM.clone(currentViewport);
+        viewportQueue = [];
+        scrollDistance = 0;
+        sj_be(window, "scroll", scroll);
+        sj_be(window, "resize", resize);
+        // Bind to page transition events: https://msdn.microsoft.com/en-us/library/dn255071(v=vs.85).aspx
+        // More information: https://developer.mozilla.org/en-US/docs/Web/Events/pageshow
+        sj_be(window, "pageshow", pageTransitionHandler);
+        sj_be(window, "pagehide", pageTransitionHandler);
+        if (visibilityState in document) {
+            sj_be(document, "visibilitychange", pageTransitionHandler, false);
+            // In current implementation Cortana doesn't respect default visibility API from web view
+            // Instead it fires a custom event, defined in: %SDXROOT%\private\frontend\Serp\AppResources\Scripts\CortanaPageVisibilityInstrumentation.ts
+            sj_evt.bind("visibility", customVisibiltyHandler);
+            // Custom cortana event from the app for expanding the viewport
+            sj_evt.bind("peekexpand", cortanaPeekExpand);
+        }
+    }
+    function viewport() {
+        // In last flight iteration we noticed errors coming from this function
+        // The only scenario where we would get errors is when some function tries to call BM.viewport
+        // without initializing viewport core module. Adding extra instrumentation to understand this.
+        if (current != null && moduleID in current) {
+            return current[moduleID];
+        }
+        else {
+            BM.error({ "FN": "viewport", "S": "current" });
+        }
+    }
+    function hasDelta(viewport) {
+        var original = current[moduleID];
+        for (var key in original) {
+            if (key !== "t" && key in viewport && original[key] !== viewport[key]) {
+                return true;
+            }
+        }
+        return false;
+    }
+    function scroll(evt) {
+        var currentViewport = BM.clone(current[moduleID]);
+        currentViewport.t = BM.time();
+        currentViewport.x = window["pageXOffset"] || de.scrollLeft;
+        currentViewport.y = window["pageYOffset"] || de.scrollTop;
+        currentViewport.e = "scroll";
+        queue.push(currentViewport);
+        BM.snapshot(moduleID);
+        return true;
+    }
+    function resize(evt) {
+        var currentViewport = BM.clone(current[moduleID]);
+        currentViewport.t = BM.time();
+        currentViewport.w = "innerWidth" in window ? window.innerWidth : de.clientWidth;
+        currentViewport.h = "innerHeight" in window ? window.innerHeight : de.clientHeight;
+        currentViewport.e = "resize";
+        queue.push(currentViewport);
+        BM.snapshot(moduleID);
+        return true;
+    }
+    function pageTransitionHandler(evt) {
+        // Reference: http://www.w3.org/TR/page-visibility/#sec-visibilitychange-event
+        var state = document[visibilityState];
+        var eventName = evt ? evt.type : "visibility";
+        // Persisted signal: https://developer.mozilla.org/en-US/Firefox/Releases/1.5/Using_Firefox_1.5_caching
+        // If persisted signal is present, augment the name with cached signal
+        if (evt.persisted) {
+            eventName += "-cached";
+        }
+        var currentViewport = BM.clone(current[moduleID]);
+        currentViewport.t = BM.time();
+        currentViewport.v = state;
+        currentViewport.e = eventName;
+        queue.push(currentViewport);
+        BM.snapshot(moduleID, state === "unloaded");
+    }
+    function customVisibiltyHandler(data) {
+        // When binding to custom events, arguments included as part of fire call are included from index 1
+        // More info on custom events: http://bing/wiki/Client_Script_Framework_Cookbook#sj_evt
+        if (data.length > 1) {
+            var state = data[1] ? "visible" : "hidden";
+            if (data.length > 2) {
+                // This is to accomodate custom visibility event in Win 10 / Threshold
+                // Since Cortana app on Threshold is responible for managing multiple web views (Proactive, QF & MyStuff) 
+                // it can fire one of the three states:
+                //   a. AppHidden - This indicates that the whole app is suspended (proactive, qf, etc. all are now invisible)
+                //   b. AppVisible - This indicates that the app just gained focus. 
+                //   c. WebVisible - This indicates that not just app is visible, but also the the web view that is running this script (e.g. QF is also in focus)
+                switch (data[2]) {
+                    case 0:
+                        state = "apphidden";
+                        break;
+                    case 1:
+                        state = "appvisible";
+                        break;
+                    case 2:
+                        state = "webvisible";
+                        break;
+                }
+            }
+            var currentViewport = BM.clone(current[moduleID]);
+            currentViewport.t = BM.time();
+            currentViewport.v = state;
+            currentViewport.e = "cortana";
+            queue.push(currentViewport);
+            BM.snapshot(moduleID, state === "hidden");
+        }
+    }
+    function cortanaPeekExpand(data) {
+        var currentViewport = BM.clone(current[moduleID]);
+        currentViewport.t = BM.time();
+        currentViewport.w = "innerWidth" in window ? window.innerWidth : de.clientWidth;
+        currentViewport.h = "innerHeight" in window ? window.innerHeight : de.clientHeight;
+        currentViewport.v = "peekexpand";
+        currentViewport.e = "cortana";
+        queue.push(currentViewport);
+        BM.snapshot(moduleID);
+    }
+    function getDistance(evtA, evtB) {
+        var dx = evtA.x - evtB.x;
+        var dy = evtA.y - evtB.y;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+    function compute(boxmodel) {
+        var lastEvent;
+        var queueLength = queue.length;
+        for (var i = 0; i < queueLength; i++) {
+            var item = queue[i];
+            if (i === 0 || i === queueLength - 1 || item.e !== "scroll" || (getDistance(item, lastEvent) > distance)) {
+                if (i === 0)
+                    BM.metric(1 /* FirstInteractionTime */, item.t);
+                else
+                    scrollDistance += getDistance(item, lastEvent);
+                boxmodel[moduleID].push(BM.delta(current[moduleID], item));
+                lastEvent = item;
+            }
+        }
+        BM.metric(8 /* ScrollDistance */, parseInt(scrollDistance));
+        queue = [];
+    }
+    function unload(boxmodel) {
+        sj_ue(window, "scroll", scroll);
+        sj_ue(window, "resize", resize);
+        sj_ue(window, "pageshow", pageTransitionHandler);
+        sj_ue(window, "pagehide", pageTransitionHandler);
+        if (visibilityState in document) {
+            sj_ue(document, "visibilitychange", pageTransitionHandler);
+            sj_evt.unbind("visibility", customVisibiltyHandler);
+            sj_evt.unbind("peekexpand", cortanaPeekExpand);
+        }
+        queue = [];
+    }
+    // Register module with Box Model core framework
+    // Need to check whether registration was sucessful
+    // We found that sometimes scripts get loaded on the page more than once,
+    // in which case modules duplicate themselves and produce javascript errors
+    // If module already exists on the page, registration will return 'false'
+    var success = BM.extend({ id: moduleID, load: load, compute: compute, unload: unload });
+    if (success) {
+        // Public helpers
+        BM.viewport = viewport;
+    }
+})(BM);
+;///<reference path="..\core.ts"/>
+(function (BM) {
+    var moduleID = "L";
+    var current;
+    var bm;
+    var body;
+    var emptyString = "";
+    var rules = BM.rules;
+    var layoutQueue;
+    var datasetAttributePrefix = "data-";
+    var recursivePriorityPropertyName = "priority";
+    var nonRecursivePriorityPropertyName = "fixedpriority";
+    function load(boxmodel) {
+        boxmodel[moduleID] = [];
+        bm = boxmodel;
+        body = document.body;
+        current = {};
+        current[moduleID] = [];
+        layoutQueue = BM.dequeue("L"); // Get layout queue
+        discover(document, BM.time());
+        layoutQueue = [];
+    }
+    function layout() {
+        return current[moduleID];
+    }
+    function discover(parent, elapsedTime) {
+        // Walk over validation rules to identify elements that we need to track
+        if (parent.querySelectorAll) {
+            for (var selector in rules) {
+                var rule = rules[selector];
+                var expectedX = rule[0];
+                var expectedY = rule[1];
+                selector += !!rule[2] ? " >*" : emptyString;
+                var elements = parent.querySelectorAll(selector);
+                for (var e = 0; e < elements.length; e++) {
+                    addLayout(elements[e], elapsedTime, "T", expectedX, expectedY);
+                }
+            }
+        }
+    }
+    function addLayout(element, elapsedTime, action, expectedX, expectedY) {
+        var layout = getLayout(element, action, elapsedTime);
+        // Sanity check that we are only recording layout for elements that are visible on screen
+        if (layout.x < 0 || layout.y < 0)
+            return;
+        // Cache expected (x,y) values for future reference in case DOM is mutated
+        if (expectedX)
+            layout._ex = expectedX;
+        if (expectedY)
+            layout._ey = expectedY;
+        // Cache src property, if it exists on the element
+        if (element.tagName === "IMG" || element.tagName === "IFRAME") {
+            layout._s = getElementSource(element);
+        }
+        // Get index at which this new layout log will be injected
+        layout.i = current[moduleID].length;
+        // Set an attribute on the element to enable easy look-ups later
+        element.setAttribute("data-bm", layout.i);
+        var hasMatch = processLayoutQueue(layout);
+        // Add layout of current element to layout array
+        if (hasMatch) {
+            calculateDelta(current[moduleID][layout.i], layout, layout.t);
+        }
+        else {
+            bm[moduleID].push(layout);
+            current[moduleID].push(BM.clone(layout));
+        }
+        return layout.i;
+    }
+    function processLayoutQueue(layout) {
+        // Check layout queue before adding this layout to Box Model object
+        var matchCount = 0;
+        for (var i = 0; i < layoutQueue.length; i++) {
+            var item = layoutQueue[i];
+            var layoutTime = layoutQueue[i].t;
+            for (var j = 0; j < item.i.length; j++) {
+                var l = item.i[j];
+                l.t = layoutTime;
+                if (l._e === layout._e) {
+                    var layoutJson = BM.clone(layout);
+                    for (var p in l)
+                        layoutJson[p] = l[p];
+                    if (matchCount === 0) {
+                        bm[moduleID].push(layoutJson);
+                        current[moduleID].push(BM.clone(layoutJson));
+                    }
+                    else {
+                        calculateDelta(current[moduleID][layout.i], layoutJson, layoutJson.t);
+                    }
+                    matchCount++;
+                }
+            }
+        }
+        return matchCount > 0;
+    }
+    function match(element) {
+        while (element && element.hasAttribute && element !== document.body) {
+            if (element.hasAttribute("data-bm")) {
+                return parseInt(element.getAttribute("data-bm"));
+            }
+            element = element.parentElement;
+        }
+        // If no match found, return null
+        return null;
+    }
+    function observe(element, elapsedTime, action, observeSubtree) {
+        if (element) {
+            var layout = current[moduleID];
+            for (var i = 0; i < layout.length; i++) {
+                if (element === layout[i]._e) {
+                    return layout[i].i;
+                }
+            }
+            // If we are watching the subtree, apply boxmodel rules to this element's children
+            // This is useful in case of Ajax content where script may add a subtree to the document
+            // Example: Images infinite scroll
+            if (observeSubtree)
+                discover(element, elapsedTime);
+            // If element is currently not tracked, add it to list of elements to watch out for
+            return addLayout(element, elapsedTime, action);
+        }
+        return null;
+    }
+    function calculateDelta(oldLayout, newLayout, elapsedTime) {
+        // Properties to watch out for while calculating delta from previous Box Model snapshot
+        var watchList = ["x", "y", "w", "h", "z"];
+        var update = {};
+        var valid = false;
+        for (var i = 0; i < watchList.length; i++) {
+            var property = watchList[i];
+            if (oldLayout[property] !== newLayout[property]) {
+                valid = true;
+                update[property] = newLayout[property];
+            }
+        }
+        if (valid) {
+            update["i"] = oldLayout["i"];
+            update["e"] = newLayout["e"];
+            update["t"] = elapsedTime;
+            // Compute delta against previously recorded event
+            var delta = BM.delta(oldLayout, update);
+            // Ideally, we wouldn't need to re-populate "e" property and this will be delta encoded like other properties
+            // However, to make things easier on analysis side, we are adding this special case for layout module.
+            delta["e"] = newLayout["e"];
+            bm[moduleID].push(delta);
+        }
+    }
+    function selector(el) {
+        return el.tagName + (el.id ? "#" + el.id : (el.className ? "." + el.className : emptyString));
+    }
+    function getLayout(el, action, elapsedTime) {
+        // Avoid re-computing element priority
+        var elementPriority;
+        var elementIndex = Number(el.getAttribute("data-bm"));
+        if (!isNaN(elementIndex) && elementIndex > -1) {
+            var existingLayout = BM.layout()[elementIndex];
+            elementPriority = existingLayout && existingLayout._e === el ? existingLayout.p : getElementPriority(el);
+        }
+        else {
+            elementPriority = getElementPriority(el);
+        }
+        var layout = { t: elapsedTime, i: null, s: selector(el), k: emptyString, x: 0, y: 0, w: el.offsetWidth, h: el.offsetHeight, z: 0, e: action, p: elementPriority, _e: el, _s: emptyString, _ex: -1, _ey: -1 };
+        if (el.tagName === "IMG" || layout.s.indexOf("rms_img") >= 0) {
+            var parentIndex = match(el);
+            layout.k = parentIndex && parentIndex < current.L.length ? current.L[parentIndex].k : emptyString;
+        }
+        else {
+            var firstLink = el.querySelector("a[h]");
+            layout.k = firstLink ? firstLink.getAttribute("h") : emptyString;
+        }
+        if (BM.exists(layout, "k")) {
+            layout.k = layout.k ? layout.k.substr(layout.k.indexOf("=") + 1) : emptyString; // check if firstLink.getAttribute("h") returned back a null object
+            layout.k = layout.k && layout.k.indexOf("javascript") >= 0 ? emptyString : layout.k; // Identity control at times send back javascript:void(0) in h attribute
+        }
+        var element = el;
+        // Wrapping following logic inside try/catch to work around known IE8 issue
+        // Calculating offsetParent in middle of a DOM Update sometimes causes IE8 to throw "Unspecified error."
+        // Reference: http://stackoverflow.com/questions/371468/looking-for-a-workaround-for-ie-6-7-unspecified-error-bug-when-accessing-offse
+        try {
+            if (el.offsetParent) {
+                do {
+                    layout.x += el.offsetLeft;
+                    layout.y += el.offsetTop;
+                } while (el = el.offsetParent);
+            }
+        }
+        catch (x) {
+            // Mark it as invalid
+            layout.x = null;
+            layout.y = null;
+        }
+        ;
+        // Update relative positioning
+        while (element !== body && (element = element.parentElement))
+            layout.z++;
+        return layout;
+    }
+    function getElementSource(element) {
+        // Wrapping following logic inside try/catch to work around known IE8 bug: http://support.microsoft.com/kb/2688188
+        try {
+            if (BM.exists(element, "src") && element["src"].indexOf("data:") !== 0) {
+                return element["src"] ? element["src"] : emptyString;
+            }
+        }
+        catch (x) { }
+        return emptyString;
+    }
+    // Determines element's priority on the page
+    function getElementPriority(element) {
+        // Check if element itself contains information about its priority
+        var priority = Number(element.getAttribute(datasetAttributePrefix + nonRecursivePriorityPropertyName))
+            || Number(element.getAttribute(datasetAttributePrefix + recursivePriorityPropertyName))
+            || -1 /* Default */;
+        // If element has no own priority property, try determining its priority from the closest parent with defined recursive priority
+        while ((element = element.parentElement) && priority === -1 /* Default */) {
+            priority = Number(element.getAttribute(datasetAttributePrefix + recursivePriorityPropertyName)) || priority;
+        }
+        return priority;
+    }
+    function compute(boxmodel) {
+        var layout = current[moduleID];
+        var elapsedTime = BM.time();
+        for (var i = 0; i < layout.length; i++) {
+            var oldLayout = layout[i];
+            var newLayout = getLayout(oldLayout._e, "R", elapsedTime);
+            calculateDelta(oldLayout, newLayout, elapsedTime);
+        }
+    }
+    function unload(boxmodel) {
+    }
+    // Register module with Box Model core framework
+    // Need to check whether registration was sucessful
+    // We found that sometimes scripts get loaded on the page more than once,
+    // in which case modules duplicate themselves and produce javascript errors
+    // If module already exists on the page, registration will return 'false'
+    var success = BM.extend({ id: moduleID, load: load, compute: compute, unload: unload });
+    if (success) {
+        // Public helpers
+        BM.observe = observe;
+        BM.match = match;
+        BM.layout = layout;
+    }
+    ;
+})(BM);
+;///<reference path="..\core.ts"/>
+(function (BM) {
+    var moduleID = "M";
+    var bm;
+    var metrics;
+    var emptyString = "";
+    var scrollDistance;
+    var firstMetric = 0 /* AboveFoldTime */; // Typescript hack to correctly resolve const enums.
+    function load(boxmodel) {
+        boxmodel[moduleID] = [];
+        bm = boxmodel;
+        metrics = [];
+        reset();
+    }
+    function reset() {
+        // Initialize metrics with a default value of an empty string
+        for (var i = 0; i < 11 /* Length */; i++)
+            metrics.push(emptyString);
+    }
+    function compute(boxmodel) {
+        if (boxmodel.P.F) {
+            // Update dwell time metric
+            BM.metric(3 /* DwellTime */, BM.time());
+            // Assign metrics to Box Model object so we can send it back to server
+            boxmodel[moduleID] = metrics;
+        }
+    }
+    function unload(boxmodel) {
+        reset();
+    }
+    function metric(metric, value) {
+        // Exit function if metrics object does not exist yet
+        if (!metrics)
+            return;
+        switch (metric) {
+            case 0 /* AboveFoldTime */:
+                metrics[metric] = metrics[metric] !== emptyString ? Math.max(metrics[metric], value) : value;
+                break;
+            case 1 /* FirstInteractionTime */:
+                metrics[metric] = metrics[metric] !== emptyString ? Math.min(metrics[metric], value) : value;
+                break;
+            default:
+                metrics[metric] = value;
+                break;
+        }
+    }
+    // Register module with Box Model core framework
+    // Need to check whether registration was sucessful
+    // We found that sometimes scripts get loaded on the page more than once,
+    // in which case modules duplicate themselves and produce javascript errors
+    // If module already exists on the page, registration will return 'false'
+    var success = BM.extend({ id: moduleID, load: load, compute: compute, unload: unload });
+    if (success) {
+        // Public helpers
+        BM.metric = metric;
+    }
+})(BM);
+;///<reference path="..\core.ts"/>
+///<reference path="..\core\metrics.ts"/>
+(function (BM) {
+    var moduleID = "MT";
+    var lastMutation = []; // Track node branches where DOM mutation occured
+    var observer;
+    var viewport;
+    var bm;
+    var firstMetric = 0 /* AboveFoldTime */; // Typescript hack to correctly resolve const enums.
+    // Check if mutation observer is available
+    function check() {
+        return typeof window["MutationObserver"] !== "undefined";
+    }
+    function load(boxmodel) {
+        bm = boxmodel;
+        var observer = new MutationObserver(mutationHandler);
+        viewport = BM.viewport();
+        if (observer) {
+            observer.observe(document.body, { childList: true, subtree: true });
+        }
+    }
+    function mutationHandler(mutations) {
+        if (observer === null)
+            return;
+        // Autosuggest adds a new drawer with each key press, destroying the previous one
+        // Goal of tracking current mutations is to ensure that with each key press we don't keep sending new elements with same selector
+        var currentMutation = [];
+        var time = BM.time();
+        for (var m = 0; m < mutations.length; m++) {
+            for (var i = 0; i < mutations[m].addedNodes.length; i++) {
+                var node = mutations[m].addedNodes[i];
+                var tag = node.tagName;
+                if (allowMutation(node)) {
+                    var layout = BM.observe(node, time, moduleID, true);
+                    // Ensure BM.observe didn't return a null object back
+                    if (layout) {
+                        // If this element is visible in the first viewport, count it towards AFT
+                        if (layout.x < viewport.w && layout.y < viewport.h) {
+                            BM.metric(0 /* AboveFoldTime */, time);
+                        }
+                    }
+                    currentMutation.push(node.parentNode);
+                }
+            }
+        }
+        // If there were valid mutations, update last tracked mutation array
+        if (currentMutation.length > 0) {
+            lastMutation = currentMutation;
+            BM.snapshot(moduleID);
+        }
+    }
+    function allowMutation(el) {
+        var visibilityCheck = el.offsetWidth >= 20 || el.offsetHeight >= 20;
+        var duplicateCheck = lastMutation.indexOf(el.parentNode) >= 0;
+        return visibilityCheck && !duplicateCheck;
+    }
+    function compute(boxmodel) {
+        /* Intentionally Blank */
+    }
+    function unload(boxmodel) {
+        if (observer)
+            observer.disconnect();
+        observer = null;
+        lastMutation = [];
+    }
+    BM.register({ id: moduleID, check: check, load: load, compute: compute, unload: unload });
+})(BM);
+;///<reference path="..\core.ts"/>
+///<reference path="..\core\viewport.ts"/>
+///<reference path="..\core\layout.ts"/>
+///<reference path="..\core\metrics.ts"/>
+(function (BM) {
+    var moduleID = "E";
+    var emptyString = "";
+    var complete = "complete";
+    var naturalWidth = "naturalWidth";
+    var config = BM.config[moduleID];
+    var buffer = config.buffer;
+    var maxUrlLength = config.maxUrlLength;
+    var timeout = config.timeout;
+    var callbackId = 0;
+    var imageErrorCount;
+    var layoutErrorCount;
+    var list = {};
+    var bm;
+    var firstMetric = 0 /* AboveFoldTime */; // Typescript hack to correctly resolve const enums.
+    function check() {
+        return true;
+    }
+    function load(boxmodel) {
+        boxmodel[moduleID] = [];
+        bm = boxmodel;
+        imageErrorCount = 0;
+        layoutErrorCount = 0;
+    }
+    function compute(boxmodel, payload) {
+        var screenWidth = BM.viewport().w;
+        var layoutElements = BM.layout();
+        for (var l = 0; l < layoutElements.length; l++) {
+            var layout = layoutElements[l];
+            var element = layout._e;
+            var expectedX = layout._ex;
+            var expectedY = layout._ey;
+            var metadata = emptyString;
+            // Skip over delta events and only attempt to calculate diff over intial state events
+            if (layout.i !== l)
+                continue;
+            // Adjust for RTL
+            expectedX = _G.RTL && expectedX >= 0 ? screenWidth - expectedX - element.offsetWidth : expectedX;
+            // Validate position, if required
+            if (expectedX >= 0 && !hasMatch(layout.x, expectedX)) {
+                metadata = layout.k.length === 0 ? getFirstUrl(element) : metadata;
+                boxmodel[moduleID].push({ t: BM.time(), l: layout.i, e: "X", v: Math.abs(layout.x - expectedX), m: metadata });
+                layoutErrorCount++;
+            }
+            if (expectedY >= 0 && !hasMatch(layout.y, expectedY)) {
+                metadata = layout.k.length === 0 ? getFirstUrl(element) : metadata;
+                boxmodel[moduleID].push({ t: BM.time(), l: layout.i, e: "Y", v: Math.abs(layout.y - expectedY), m: metadata });
+                layoutErrorCount++;
+            }
+            if (element.tagName === "IMG" && !(layout.i in list)) {
+                var src = getElementSource(element);
+                if (src) {
+                    var complete = BM.exists(element, complete) ? element[complete] : true;
+                    var valid = BM.exists(element, naturalWidth) ? element[naturalWidth] > 0 : true;
+                    // If image is not complete, then it could mean one of two things depending on browser:
+                    //    a) IE: Any image that fails to load or is in the middle of loading will be marked as incomplete
+                    //    b) Chrome / Safari: Any image that is in the middle of loading will be marked as incomplete
+                    // Therefore, in both the cases above, we want to attach event bindings to see if this image will eventually load or error out.
+                    // The only special case is IE, where image may have already failed and adding event bindings won't really help. To deal with
+                    // this case, we trigger a callback after scheduled timeout to see if image is still busted and if so we log it as an error.
+                    if (!complete) {
+                        list[layout.i] = { _e: element, _s: src, _d: false, _b: true };
+                        watch(element, true);
+                    }
+                    else if (!valid) {
+                        list[layout.i] = { _e: element, _s: src, _d: true, _b: false };
+                        logImageFailure(l, src);
+                    }
+                }
+            }
+            // Watching for images used as CSS background instead of explicit IMG tags
+            // data-* is a recommended way of passing metadata with DOM elements and
+            // RMS(resource management system) uses "data-src" to indicate image stitching strategy using a DIV with backgroundImage
+            // E.g. markup sent from server: <div class="rms_iac" style="height:110px;width:110px;" ... data-class="rms_img" data-src="/th?id=X"></div>
+            // We want to continue checking these type of images too and not just explicit IMG tags
+            // And, success criteria for stitched images is that once image is loaded from data-src property, DIV's background-image CSS property is updated
+            // If, however, even after a timeout we detect that background-image property is missing on these DIV's then it's a bad sign and we report that
+            // as image failure.
+            if (element.tagName === "DIV" && element.hasAttribute("data-src") && !(layout.i in list)) {
+                var src = element.getAttribute("data-src");
+                var backgroundImage = element.style.backgroundImage;
+                // If we spot a data-src attribute on the DIV but do not see matching backgroundImage in inline styles
+                // Then, this could mean one of two things:
+                //    a) Image in data-src failed to load and therefore we haven't set background-image on the element
+                //    b) Image is still being downloaded and it's too early to say if image will succeed or fail
+                // Since it's hard to say if the image will eventually fail, or has already failed, we add it to watch list so we can
+                // come back and see if anything has changed since last time and if not, log the error.
+                if (!backgroundImage) {
+                    list[layout.i] = { _e: element, _s: src, _d: false, _b: false };
+                    watch(element, false);
+                }
+            }
+        }
+        BM.metric(5 /* LayoutErrorCount */, layoutErrorCount);
+        BM.metric(6 /* ImageErrorCount */, imageErrorCount);
+    }
+    // In future, this code should be consolidated with layout.ts and exposed as a common utility function
+    // At the moment it is forked because it attempts to look at data URIs too which the other version doesn't
+    function getElementSource(element) {
+        // Wrapping following logic inside try/catch to work around known IE8 bug: http://support.microsoft.com/kb/2688188
+        try {
+            if (BM.exists(element, "src")) {
+                return element["src"] ? element["src"] : emptyString;
+            }
+        }
+        catch (x) { }
+        return emptyString;
+    }
+    function watch(element, bind) {
+        if (bind) {
+            sj_be(element, "load", handler);
+            sj_be(element, "error", handler);
+        }
+        // If we don't already have a scheduled callback to revist items in watch list
+        // then, schedule one right away. We only need to do this once per snapshot
+        if (!callbackId)
+            callbackId = sb_st(update, timeout);
+    }
+    function handler(e) {
+        var evt = window.event || e;
+        var target = sj_et(e);
+        return update(evt.type, target);
+    }
+    function update(type, element) {
+        var failCount = 0;
+        for (var index in list) {
+            if (!list[index]._d && (!element || list[index]._e === element)) {
+                var el = list[index]._e;
+                var failed = el.tagName === "IMG" ? !el[complete] || (type && type === "error") : !el.style.backgroundImage;
+                if (list[index]._b) {
+                    sj_ue(el, "load", handler);
+                    sj_ue(el, "error", handler);
+                }
+                if (failed) {
+                    logImageFailure(index, list[index]._s);
+                    failCount++;
+                }
+                list[index]._d = true; // Mark it as done
+                // Bail out if we were only updating one single element
+                if (element)
+                    return;
+            }
+        }
+        if (failCount > 0) {
+            BM.snapshot("E");
+        }
+        callbackId = 0;
+    }
+    function logImageFailure(index, src) {
+        // We noticed invalid indices sent from this function that cause impressions to be BoxModelInvalid on the backend
+        // Disabling this function until we figure out what is causing the error
+        //
+        // bm[moduleID].push({ t: BM.time(), l: index, e: "S", v: 404, m: src.substr(0, maxUrlLength) });
+        // imageErrorCount++;
+    }
+    function getFirstUrl(element) {
+        var firstLink = element.querySelector("a");
+        return firstLink && firstLink.href ? firstLink.href.substr(0, maxUrlLength) : emptyString;
+    }
+    function hasMatch(actual, expected) {
+        return (actual >= (expected - buffer) && actual <= (expected + buffer));
+    }
+    function unload() {
+        // Clear out any active event bindings
+        for (var index in list) {
+            var item = list[index];
+            if (item._b && !item._d) {
+                sj_ue(item._e, "load", handler);
+                sj_ue(item._e, "error", handler);
+            }
+        }
+        // Clear out any active callback
+        if (callbackId) {
+            sb_ct(callbackId);
+            callbackId = 0;
+        }
+        list = {};
+    }
+    // Register module with Box Model core framework
+    BM.register({ id: moduleID, check: check, load: load, compute: compute, unload: unload });
+})(BM);
+;///<reference path="..\core.ts"/>
+///<reference path="..\core\viewport.ts"/>
+///<reference path="..\core\metrics.ts"/>
+(function (BM) {
+    var moduleID = "N";
+    var coreModuleId = "B";
+    // In case of Ajax requests, we share same Javascript context across pages
+    // Using offset values help us send right subset of data applicable to that particular page
+    var lastNetworkOffset = 0;
+    var pageStartTime = 0;
+    var timeOffset = 0;
+    var aboveFoldTime;
+    var viewport;
+    var externalNetworkCount;
+    var maxStringLength = BM.config[moduleID].maxUrlLength;
+    var a = document.createElement("A");
+    var emptyString = "";
+    var delimiter = "/";
+    var colon = ":";
+    var clientInstRegex = /"name":"(.*?)"/;
+    var current = {};
+    var whitelist = [location.hostname, "live.com", "virtualearth.net", "bing.net", "msedge.net", "skype.com", "microsofttranslator.com", "footprintdns.com", "testanalytics.net", "footprintpredict.com"];
+    var firstMetric = 0 /* AboveFoldTime */; // Typescript hack to correctly resolve const enums.
+    // Register module with Box Model core framework if resource timings API is available
+    function check() {
+        return _w.performance && performance.now && performance.getEntries;
+    }
+    function load(boxmodel) {
+        boxmodel[moduleID] = [];
+        current[moduleID] = [];
+        aboveFoldTime = performance.timing.loadEventEnd - performance.timing.navigationStart;
+        viewport = BM.viewport();
+        externalNetworkCount = 0;
+        // Log First Paint Metric
+        logFirstPaint();
+    }
+    function compute(boxmodel, payload) {
+        if (!(moduleID in current))
+            return;
+        var networkModule = boxmodel[moduleID];
+        var currentModule = current[moduleID];
+        var performanceTiming = performance.timing;
+        var networkEntries = performance.getEntries();
+        // Determine if any parameter has changed since last time we sent network traffic
+        // If so, send back a delta event to indicate that
+        for (var i = 0; i < currentModule.length; i++) {
+            var resource = currentModule[i]._r;
+            // Record delta only if:
+            //   a) we are looking at an entry that captured state, and not a delta event
+            //   b) duration is different than what was previously recorded
+            if (currentModule[i].i == i && resource && getNumber(resource.duration) !== currentModule[i].d) {
+                boxmodel.N.push(BM.delta(currentModule[i], { i: currentModule[i].i, t: BM.time(), d: getNumber(resource.duration) }));
+            }
+        }
+        // Add basic info on network requests
+        var rLength = networkEntries.length;
+        for (var n = lastNetworkOffset; n < rLength; n++) {
+            var request = networkEntries[n];
+            var name = request.name;
+            var parts = getUrlParts(name);
+            var isExternal = true;
+            // Update page start timer and above fold time when we encounter JSON request for Ajax SERP
+            if (name.indexOf("format=snrjson") >= 0 && name.indexOf("progrender=1") === -1) {
+                pageStartTime = request.startTime;
+                aboveFoldTime = request.duration;
+            }
+            // Check if this request tried to get response from an external domain
+            for (var i = 0; i < whitelist.length; i++) {
+                if (parts[1].indexOf(whitelist[i]) >= 0 || parts[1] === emptyString) {
+                    isExternal = false;
+                    break;
+                }
+            }
+            if (isExternal)
+                externalNetworkCount++;
+            var start = getDifference(request.startTime, pageStartTime);
+            var duration = getNumber(request.duration);
+            var connectionStart = getDifference(request.connectStart, pageStartTime);
+            // When there is no secure connection to be made, secureConnectionStart === 0, and we want to record this 0 value
+            var secureConnectionStart = request.secureConnectionStart === 0 ? 0 : getDifference(request.secureConnectionStart, pageStartTime);
+            var connectionEnd = getDifference(request.connectEnd, pageStartTime);
+            var requestStart = getDifference(request.requestStart, pageStartTime);
+            var responseStart = getDifference(request.responseStart, pageStartTime);
+            var responseEnd = getDifference(request.responseEnd, pageStartTime);
+            var layoutPointer = null;
+            var layoutElements = BM.layout();
+            for (var l = 0; l < layoutElements.length; l++) {
+                var layout = layoutElements[l];
+                var element = layout._e;
+                var src = layout._s;
+                if (src) {
+                    if (name === src) {
+                        layoutPointer = layout.i;
+                        // If this element is visible in the first viewport, count it towards AFT
+                        // By definition, AFT is time to load pixels above the fold
+                        if (layout.x < viewport.w && layout.y < viewport.h) {
+                            aboveFoldTime = start;
+                        }
+                        break;
+                    }
+                }
+            }
+            var networkData = {
+                _r: request,
+                t: start,
+                i: currentModule.length,
+                l: layoutPointer,
+                h: parts[1],
+                p: (parts[2].length === 0 ? parts[3] : parts[2]),
+                s: request.initiatorType,
+                d: duration,
+                pc: parts[0],
+                cs: connectionStart,
+                sc: secureConnectionStart,
+                ce: connectionEnd,
+                rs: requestStart,
+                rt: responseStart,
+                re: responseEnd
+            };
+            networkModule.push(networkData);
+            currentModule.push(BM.clone(networkData));
+        }
+        lastNetworkOffset = rLength;
+        BM.metric(0 /* AboveFoldTime */, aboveFoldTime);
+        BM.metric(4 /* NetworkCount */, currentModule.length);
+        BM.metric(7 /* ExternalNetworkCount */, externalNetworkCount);
+    }
+    function logFirstPaint() {
+        var firstPaint = -1;
+        var navStart = performance.timing.navigationStart;
+        if (performance.timing && performance.timing.msFirstPaint) {
+            firstPaint = getDifference(performance.timing.msFirstPaint, navStart);
+        }
+        else if (_w["chrome"] && _w["chrome"].loadTimes) {
+            var timing = _w["chrome"].loadTimes();
+            if ("firstPaintAfterLoadTime" in timing) {
+                firstPaint = getDifference((timing["firstPaintAfterLoadTime"] * 1000), navStart);
+            }
+        }
+        BM.metric(2 /* FirstPaintTime */, firstPaint);
+    }
+    function getUrlParts(url) {
+        // Grab URL parts from URL
+        a.href = url;
+        var i, j, parts;
+        var protocol = a.protocol;
+        var host = a.hostname;
+        var path = a.pathname;
+        // Remove : from protocol, e.g. http: -> http
+        var colonIndex = protocol.indexOf(colon);
+        protocol = colonIndex >= 0 ? protocol.substr(0, colonIndex) : protocol;
+        // Cleanup pathname since Chrome always begin path with "/" whereas IE omits the leading slash
+        path = path.indexOf(delimiter) === 0 ? path.substr(1) : path;
+        var query = a.search.toLowerCase();
+        var rawPath = host.length > 0 ? path.substr(0, maxStringLength) : url.substr(0, maxStringLength);
+        // First case extracts information from log service requests that helps us differentiate
+        // Example #1: /fd/ls/l?IG=28149d941cff485c91585bf0aa08af4b&Type=Event.CPT&DATA={%22pp%22:{%22S%22:%22L%22,%22FC%22:26,%22BC%22:100,%22H%22:111,%22BP%22:134,%22CT%22:161,%22IL%22:5},%22ad%22:[-1,-1,1583,395,1583,1564,1],%22w3c%22:%2217fdf0,,e,,,d6,,88,40,d6,,,1,,,-14%22,%22nav%22:0}&P=SERP&DA=BN1&MN=SERP
+        // Changes to: cpt (because that's one of the most useful pieces of information)
+        if (query.length > 0 && (i = query.indexOf("event.")) > 0 && (j = query.indexOf("&data")) > 0) {
+            path = query.substr(i, j - i).replace("event.", emptyString);
+            // Example #2: /fd/ls/ls.gif?IG=7af7755b8dbd41de84d0e6c3aa60f3a0&Type=Event.ClientInst&DATA={%22T%22:%22CI.Hover%22,%22AppNS%22:%22SERP%22,%22K%22:%225369.1%22,%22Name%22:%22VidCaption%22,%22HType%22:%22h%22,%22TS%22:1420854684550}&log=UserEvent
+            // In case of clientinst events, grab event's name if present.
+            if (path === "clientinst") {
+                var match = clientInstRegex.exec(query.replace(/%22/g, '"'));
+                if (match != null && match.length > 1) {
+                    path = match[1];
+                }
+            }
+        }
+        else if (path.indexOf("rms/") === 0 && (parts = path.split(delimiter)) && parts.length > 1) {
+            path = parts[1].replace("rms%20answers%20", emptyString).replace(".source", emptyString);
+        }
+        else if ((parts = path.split(delimiter)) && parts.length >= 2) {
+            path = parts[parts.length - 2] + delimiter + parts[parts.length - 1];
+        }
+        return [protocol, host, path, rawPath];
+    }
+    function getDifference(a, b) {
+        return a && a > 0 ? getNumber(a - b) : -1;
+    }
+    function getNumber(num) {
+        return num < -1 ? -1 : parseInt(num);
+    }
+    function unload() {
+        /* Intentionally Blank */
+    }
+    BM.register({ id: moduleID, check: check, load: load, compute: compute, unload: unload });
+})(BM);
+;///<reference path="..\core.ts"/>
+///<reference path="..\core\metrics.ts"/>
+(function (BM) {
+    var moduleID = "C";
+    var queue = [];
+    var current = {};
+    var distance = BM.config[moduleID].distance;
+    var events = ["click", "mousedown", "mouseup", "mousemove", "touchstart", "touchend", "touchmove"];
+    var cursorDistance;
+    var de;
+    var bm;
+    var enqueueErrorLogged = false;
+    var state = 0 /* Created */;
+    var boundEvents = [];
+    var firstMetric = 0 /* AboveFoldTime */; // Typescript hack to correctly resolve const enums.
+    function check() {
+        return true;
+    }
+    function load(boxmodel) {
+        state = 1 /* Loading */;
+        boxmodel[moduleID] = [];
+        bm = boxmodel;
+        de = document.documentElement;
+        queue = [];
+        cursorDistance = 0;
+        current = {};
+        eventManager(sj_be, enqueue);
+        dequeue();
+        state = 2 /* Loaded */;
+    }
+    function eventManager(api, handler) {
+        for (var i = 0; i < events.length; i++) {
+            var evt = events[i];
+            var eventName = window.navigator.pointerEnabled ? evt.replace("mouse", "pointer") : evt;
+            api(document, eventName, handler, false);
+            // Keep track of what events is this module is subscribed to
+            // This may help us diagnose whether some events aren't getting unbound on unload
+            if (api === sj_be) {
+                boundEvents.push(eventName);
+            }
+            else if (api === sj_ue) {
+                for (var j = boundEvents.length - 1; j >= 0; j--) {
+                    if (boundEvents[j] === eventName) {
+                        boundEvents.splice(j, 1);
+                    }
+                }
+            }
+        }
+    }
+    function dequeue() {
+        var cursorQueue = BM.dequeue("EVT");
+        for (var i = 0; i < cursorQueue.length; i++) {
+            var evt = cursorQueue[i].i;
+            if (validate(evt.type)) {
+                enqueue(evt, cursorQueue[i].t);
+            }
+        }
+    }
+    function validate(evtType) {
+        for (var i = 0; i < events.length; i++) {
+            if (events[i] === evtType.replace("pointer", "mouse"))
+                return true;
+        }
+    }
+    function enqueue(evt, time) {
+        evt = evt || _w.event;
+        var touch = evt.touches && evt.touches.length > 0 ? evt.touches[0] : null;
+        var pointer = evt.pointerType || (evt.type.indexOf("touch") == 0 && "touch") || "mouse";
+        var object = {
+            _e: evt.target,
+            t: time || BM.time(),
+            l: null,
+            e: evt.type,
+            p: pointer,
+            b: BM.exists(evt, "button") ? evt.button : null,
+            x: touch ? touch.pageX : ("pageX" in evt ? evt.pageX : ("clientX" in evt ? evt.clientX + de.scrollLeft : null)),
+            y: touch ? touch.pageY : ("pageY" in evt ? evt.pageY : ("clientY" in evt ? evt.clientY + de.scrollTop : null)),
+            s: BM.exists(evt, "buttons") ? evt.buttons : null // look up for zeros
+        };
+        queue.push(object);
+        // We noticed errors coming from this module trying to call snapshot,
+        // when core declared "initialized = false" (happens in unload)
+        // Adding instrumentation to better understand this error
+        if (state === 2 /* Loaded */ || state === 1 /* Loading */) {
+            BM.snapshot(moduleID);
+        }
+        else if (!enqueueErrorLogged) {
+            // Only log error once to avoid generating new XHR for each cursor event that comes after unload
+            BM.error({ "FN": "enqueue", "S": "C", "ET": evt.type, "EVTS": boundEvents.join("+") });
+            enqueueErrorLogged = true;
+        }
+        return true;
+    }
+    function getDistance(evtA, evtB) {
+        var dx = evtA.x - evtB.x;
+        var dy = evtA.y - evtB.y;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+    function compute(boxmodel) {
+        var queueLength = queue.length;
+        if (queueLength > 0) {
+            var pointer = moduleID in current ? current[moduleID] : null;
+            for (var i = 0; i < queueLength; i++) {
+                var evt = queue[i];
+                if (i === 0 || i === queueLength - 1 || evt.e.indexOf("move") < 0 || (getDistance(evt, pointer) > distance)) {
+                    evt.l = BM.match(evt._e);
+                    // If this is the first event, send it as it is
+                    if (pointer === null) {
+                        BM.metric(1 /* FirstInteractionTime */, evt.t);
+                        pointer = current[moduleID] = BM.clone(evt);
+                        boxmodel[moduleID].push(evt);
+                    }
+                    else {
+                        cursorDistance += getDistance(evt, pointer);
+                        boxmodel[moduleID].push(BM.delta(pointer, evt));
+                    }
+                }
+            }
+            queue = [];
+        }
+        BM.metric(9 /* CursorDistance */, parseInt(cursorDistance));
+    }
+    function unload(boxmodel) {
+        state = 3 /* Unloading */;
+        eventManager(sj_ue, enqueue);
+        state = 4 /* Unloaded */;
+    }
+    // Register module with Box Model core framework
+    BM.register({ id: moduleID, check: check, load: load, compute: compute, unload: unload });
+})(BM);
+;///<reference path="..\core.ts"/>
+///<reference path="..\core\metrics.ts"/>
+(function (BM) {
+    var moduleID = "K";
+    var events = ["keydown", "keypress"];
+    var bm;
+    // Typescript hack to correctly resolve const enums. Without this it assigns arbitary int values to enum keys.
+    var firstMetric = 0 /* AboveFoldTime */;
+    function check() {
+        return true;
+    }
+    function load(boxmodel) {
+        boxmodel[moduleID] = [];
+        bm = boxmodel;
+        eventManager(sj_be, enqueue);
+        dequeue();
+    }
+    function eventManager(api, handler) {
+        for (var i = 0; i < events.length; i++) {
+            var evt = events[i];
+            api(document, evt, handler, false);
+        }
+    }
+    function dequeue() {
+        var keyboardQueue = BM.dequeue("EVT");
+        for (var i = 0; i < keyboardQueue.length; i++) {
+            var evt = keyboardQueue[i].i;
+            if (evt.type === "keydown") {
+                enqueue(evt, keyboardQueue[i].t);
+            }
+        }
+    }
+    function enqueue(evt, time) {
+        // See comment in event.queue.ts for more details on evt vs. _w.event in IE browsers
+        evt = evt || _w.event;
+        time = time || BM.time();
+        bm[moduleID].push({
+            t: time,
+            l: BM.observe(evt.target, time, moduleID),
+            e: evt.type,
+            m: evt.shiftKey << 1 | evt.ctrlKey << 2 | evt.altKey << 3 | evt.metaKey << 4 | (evt.repeat || 0) << 5 | (evt.isComposing || 0) << 6 | (evt.location || 0) << 16
+        });
+        BM.snapshot(moduleID);
+        return true;
+    }
+    function compute(boxmodel) {
+        /* Intentionally Blank */
+    }
+    function unload(boxmodel) {
+        eventManager(sj_ue, enqueue);
+    }
+    // Register module with Box Model core framework
+    BM.register({ id: moduleID, check: check, load: load, compute: compute, unload: unload });
+})(BM);
+;///<reference path="..\core.ts"/>
+///<reference path="..\core\metrics.ts"/>
+(function (BM) {
+    var moduleID = "BD"; // Bot Detection
+    var events = ["click", "mousedown", "mouseup", "touchstart", "touchend", "mousemove", "touchmove", "scroll", "keydown", "resize"];
+    var bm;
+    var active = false;
+    var config = BM.config[moduleID];
+    var basicExperience = config && config.basic ? config.basic : false;
+    var firstMetric = 0 /* AboveFoldTime */; // Typescript hack to correctly resolve const enums.
+    function check() {
+        return true;
+    }
+    function load(boxmodel) {
+        boxmodel[moduleID] = [];
+        bm = boxmodel;
+        BM.metric(10 /* IsHuman */, 0);
+        eventManager(sj_be, detect);
+        active = true;
+        dequeue();
+        // If we are in basic mode, use Ajax to pull in new resources
+        // If not, use a client-side redirect
+        if (basicExperience) {
+            basicExperience = false;
+            var cookie = sj_cook.get("_SS", "HV");
+            if (cookie && cookie.length > 0 && location.href.indexOf("&rdr=1") === -1 && location.href.indexOf("?") > 0) {
+                var redirectUrl = location.href + "&rdr=1" + (_G && _G.IG ? "&rdrig=" + _G.IG : "");
+                if (typeof (window["sj_lc"]) !== "undefined") {
+                    window["sj_lc"](redirectUrl);
+                }
+                else {
+                    location.href = redirectUrl;
+                }
+            }
+            else {
+                var content = document.getElementById("b_content");
+                if (content)
+                    content.style.visibility = "visible";
+            }
+        }
+    }
+    function eventManager(api, handler) {
+        for (var i = 0; i < events.length; i++) {
+            var evt = events[i];
+            api(evt === "resize" ? window : document, window.navigator.pointerEnabled ? evt.replace("mouse", "pointer") : evt, handler, false);
+        }
+    }
+    function dequeue() {
+        var botQueue = BM.dequeue("EVT");
+        if (botQueue.length > 0)
+            detect(botQueue[0].i, botQueue[0].t);
+    }
+    function detect(evt, time) {
+        if (active) {
+            // See comment in event.queue.beta.ts for more details on evt vs. _w.event in IE browsers
+            evt = evt || _w.event;
+            var timestamp = "" + Math.round(new Date().getTime() / 1000);
+            bm[moduleID].push({ t: time || BM.time(), e: evt.type, s: timestamp });
+            // Intentionally obscuring the cookie name, HV: Human vs. Bot
+            sj_cook.set("_SS", "HV", timestamp, false, "/");
+            // For bot detection, we only need to wait for the first interaction
+            // As soon as we get at least one event, unbind all the existing event bindings
+            active = false;
+            eventManager(sj_ue, detect);
+            // Update metric to reflect that we have received an event
+            BM.metric(10 /* IsHuman */, 1);
+            // Schedule a snapshot
+            BM.snapshot(moduleID);
+        }
+        return true;
+    }
+    function compute(boxmodel) {
+        /* Intentionally Blank */
+    }
+    function unload(boxmodel) {
+        if (active) {
+            eventManager(sj_ue, detect);
+            active = false;
+        }
+    }
+    // Register module with Box Model core framework
+    BM.register({ id: moduleID, check: check, load: load, compute: compute, unload: unload });
+})(BM);
+;

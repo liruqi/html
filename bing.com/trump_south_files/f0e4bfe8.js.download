@@ -1,0 +1,534 @@
+/**
+* WRT - Web Result Toolbox
+*/
+var WRT = function ()
+{
+    var _capParentClassnames = ["b_algo","b_ans"];
+    var _toolboxTriggerClassName = "c_tlbxTrg";
+    var _cachedPageResultPartHint = "BASE:CACHEDPAGEDEFAULT";
+    var _preferDomainStartResultPartHint = "BASE:PREFERDOMAINSTART";
+    var _preferDomainStopResultPartHint = "BASE:PREFERDOMAINSTOP";
+    var _staticIconClass = "sw_ddgn";
+    var _selectedIconClass = "sw_ddw";
+    var toolboxPlugins = {};
+    var activeToolbox;
+
+    /**
+    * Initializes all WebResultToolboxes
+    * @private
+    */
+    function Init()
+    {
+        var resultsNode = _ge("b_results");
+
+        if (resultsNode && _w.sa_CTBConfig)
+        {
+            toolboxPlugins[_cachedPageResultPartHint] = cachedPagePlugin;
+            toolboxPlugins[_preferDomainStartResultPartHint] = preferredSourcesPlugin;
+            toolboxPlugins[_preferDomainStopResultPartHint] = preferredSourcesPlugin;
+
+            sj_be(sj_b, "click", function (evt) { closeToolbox(evt) });
+            sj_evt.bind('onPopTR', function (evt) { closeToolbox(evt, /*forceClose*/true) });
+
+            //handle mousedown and mouseup event , or this feature will conflict with algo clicking behavior. 
+            sj_be(sj_b, "mousedown", function (evt) { handleMouseEvent(evt) });
+            sj_be(sj_b, "mouseup", function (evt) { handleMouseEvent(evt) });
+
+
+            wireUpCaptionsLoop(resultsNode.firstChild);
+        }
+    }
+
+    /**
+    * Calls caption wire up and loops on the next sibling.
+    * @private
+    * @param {DOM} caption The caption DOM to be wired up.
+    */
+    function wireUpCaptionsLoop(caption)
+    {
+        /* We should look only at node type 1 (elements) and exclude comments */
+        if (caption && caption.nodeType == 1)
+        {
+            wireupCaption(caption);
+
+            // call wire up on the next caption in the list
+            wireUpCaptionsLoop(caption.nextSibling);
+        }
+    }
+
+
+    /**
+    * Wires up the caption
+    * @private
+    * @param {DOM} caption The caption DOM to be wired up.
+    */
+    function wireupCaption(caption)
+    {
+        if (caption)
+        {
+            // Find trigger
+            var toolboxTrigger = findDescendantByClassName(_toolboxTriggerClassName, caption, "span");
+            var citeTags = caption.getElementsByTagName("cite");
+            var captionTrigger = childWhere(caption, "u");
+            
+            // Discard entity caption triggers
+            if (captionTrigger && getAttribute(captionTrigger, "u")[0] === 'e')
+            {
+                captionTrigger = null;
+            }
+
+            if (toolboxTrigger && citeTags.length)
+            {
+                var citeTag = citeTags[0];
+
+                caption.tt = toolboxTrigger;
+                if (populateToolbox(caption, captionTrigger))
+                {
+                    // Create an anchor so this is keyboard accessible.
+                    // Only create in script to avoid having broken anchor cluttering up the page before scripts run
+                    var triggerIconAnchor = sj_ce("a");
+                    triggerIconAnchor.href = "#";
+                    triggerIconAnchor.setAttribute("aria-label", sa_CTBConfig.TRGT);
+                    triggerIconAnchor.setAttribute("aria-haspopup", "true");
+                    sj_be(triggerIconAnchor, "click", openToolbox);
+
+                    // Swap the anchor into place as the new toolbox parent
+                    toolboxTrigger.parentNode.replaceChild(triggerIconAnchor, toolboxTrigger);
+                    triggerIconAnchor.appendChild(toolboxTrigger);
+
+                    // Create the toolbox icon
+                    var triggerIcon = sj_ce("span", 0, "c_tlbxTrgIcn " + _staticIconClass);
+                    caption.ti = triggerIcon;
+                    toolboxTrigger.insertBefore(triggerIcon, toolboxTrigger.firstChild);
+                }
+            }
+        }
+    }
+
+    /**
+    * Builds out a toolbox.  Called at Init time.
+    * @private
+    * @param {DOM} caption The caption to create a Toolbox for
+    * @param {DOM} trigger The caption trigger element where the u parameter was found
+    */
+    function populateToolbox(caption, trigger)
+    {
+        var toolbox = sj_ce("div", 0, "c_tlbx");
+        var previousPlugin;
+
+        // Walk all the resultpart nodes in the Toolbox position
+        for (var i in caption.tt.childNodes)
+        {
+            var resultPart = caption.tt.childNodes[i];
+            var hint = getAttribute(resultPart, "h");
+
+            if (hint)
+            {
+                var pluginWrapper = sj_ce("div");
+
+                // Execute the plugin matching this resultpart
+                toolboxPlugins[hint](caption, trigger, resultPart, pluginWrapper);
+
+                // Check for success before wiring the thing in
+                if (pluginWrapper.childNodes.length)
+                {
+                    if (previousPlugin)
+                    {
+                        previousPlugin.className += " c_tlbxIS";
+                    }
+                    toolbox.appendChild(pluginWrapper);
+                    previousPlugin = pluginWrapper;
+                }
+            }
+        }
+
+        // Only finalize the toolbox if it has something in it
+        if (toolbox.childNodes.length)
+        {
+            caption.toolbox = toolbox;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+    * Shows a toolbox on the page.  Called when the user interacts with the toolbox trigger.
+    * @private
+    */
+    function openToolbox(evt)
+    {
+        var caption = findCaptionFromElement(sj_et(evt));
+
+        if (caption)
+        {
+            var previousToolbox = activeToolbox;
+            closeToolbox(evt);
+
+            var toolbox = caption.toolbox;
+            if (toolbox && toolbox != previousToolbox)
+            {
+                caption.ti.className = caption.ti.className.replace(_staticIconClass, _selectedIconClass);
+                caption.tt.className += " sel";
+
+                toolbox.style.top = (sj_go(caption.ti, "Top") + 9) + "px";
+                toolbox.style.left = (sj_go(caption.ti, "Left") - 3) + "px";
+
+                // We want to place the toolbox right after the trigger for proper tabbing order.
+                caption.tt.parentNode.parentNode.appendChild(toolbox);
+
+                activeToolbox = toolbox;
+                activeToolbox.caption = caption;
+
+                instrumentOpen(caption);
+            }
+
+            return preventDefault(evt);
+        }
+
+        return true;
+    }
+
+    /**
+    * Hides any toolbox that is open.  Called when another toolbox is opened, or when the user interacts with the page to cause the previous toolbox to close.
+    * @private
+    */
+    function closeToolbox(evt, forceClose)
+    {
+        if (activeToolbox)
+        {
+            var eventTarget = sj_et(evt);
+            var caption = activeToolbox.caption;
+
+            //close toolbox.
+            if (forceClose || !sj_we(eventTarget, activeToolbox, caption))
+            {
+                caption.ti.className = caption.ti.className.replace(_selectedIconClass, _staticIconClass);
+                caption.tt.className = caption.tt.className.replace(/ sel/g, "");
+
+                activeToolbox.parentNode.removeChild(activeToolbox);
+                activeToolbox = 0;
+            }
+
+            //prevent default behaviour when clicking on active toolbox.
+            if (sj_we(eventTarget, caption)) {
+                sj_sp(evt);
+            }
+        }
+
+        return true;
+    }
+
+    /**
+    * stop the propagation when clicking other area of caption with actived toolbox.
+    * @private
+    */
+    function handleMouseEvent(evt)
+    {
+        if (activeToolbox) {
+            var target = sj_et(evt);
+            var caption = activeToolbox.caption;
+            if (target.tagName.toLowerCase() != 'a' && sj_we(target, caption)) {
+                sj_sp(evt);
+            }
+        }
+        return true;
+    }
+
+    /**
+    * A plugin that creates a cached page link for a given algo
+    * @private
+    * @param {DOM} caption       The caption to create a Toolbox for
+    * @param {DOM} trigger       The caption trigger element where the u parameter was found
+    * @param {DOM} resultPart    The resultpart from the server associated with this plugin
+    * @param {DOM} pluginWrapper A DOM node to push the cached page link into
+    */
+    function cachedPagePlugin(caption, trigger, resultPart, pluginWrapper)
+    {
+        if (sa_CTBConfig.CU)
+        {
+            var u = getAttribute(trigger, "u");
+            if (u) {
+                var newWin = sa_CTBConfig.NW == "1" ? true : undefined; 
+                var fragments = u.split("|");
+                var url = sa_CTBConfig.CU.replace("{0}", fragments[2]);
+                pluginWrapper.appendChild(createToolboxLink(url.replace("{1}", fragments[3]), sa_CTBConfig.CT, getAttribute(resultPart, "k"), newWin));
+            }
+        }
+    }
+
+    /**
+    * A plugin that creates a preferred sources link
+    * @private
+    * @param {DOM} caption       The caption to create a Toolbox for
+    * @param {DOM} trigger       The caption trigger element where the u parameter was found
+    * @param {DOM} resultPart    The resultpart from the server associated with this plugin
+    * @param {DOM} pluginWrapper A DOM node to push the cached page link into
+    */
+    function preferredSourcesPlugin(caption, trigger, resultPart, pluginWrapper)
+    {
+        var hint = getAttribute(resultPart, "h");
+        if (hint)
+        {
+            var url;
+            var text;
+
+            // Figure out if we're showing a start or stop personalize link and grab the right values from config
+            if (hint.indexOf("START") > 0)
+            {
+                url = sa_CTBConfig.PDSU;
+                text = sa_CTBConfig.PDS;
+            }
+            else
+            {
+                url = sa_CTBConfig.PDEU;
+                text = sa_CTBConfig.PDE;
+            }
+
+            // Grab the url from the algo and try to yank a domain out of it.
+            var algoDomain = caption.getElementsByTagName("h3")[0].childNodes[0].href;
+            var cutIndex = algoDomain.indexOf("//");
+            if (cutIndex > 0)
+            {
+                algoDomain = algoDomain.substring(cutIndex + 2);
+            }
+            cutIndex = algoDomain.indexOf("/");
+            if (cutIndex > 0)
+            {
+                algoDomain = algoDomain.substring(0, cutIndex);
+            }
+            url = url.replace("{0}", encodeURIComponent(algoDomain));
+
+            var toolboxLink = createToolboxLink("#", text, getAttribute(resultPart, "k"));
+            toolboxLink.onclick = function (evt) { (new Image).src = url.replace("{1}", sj_cook.get("MUID", "MUID")); return closeToolbox(evt, true); };
+            pluginWrapper.appendChild(toolboxLink);
+        }
+    }
+
+    /**
+    * Helper function to stop event bubbling when an event is handled
+    * @private
+    * @param {DOM} evt  The event object provided as an argument to the callback function
+    */
+    function preventDefault(evt)
+    {
+        var evt = sj_ev(evt);
+        if (evt)
+        {
+            evt.cancelBubble = true;
+        }
+        sj_pd(evt);
+        return false;
+    }
+
+    /**
+    * Helper function to create links for the toolbox
+    * @private
+    * @param {DOM} url      Url of the toolbox link
+    * @param {DOM} text     Text value of the toolbox link
+    * @param {DOM} k        Instrumented k value of the toolbox link
+    * @param {DOM} newWin   Whether to open the link in new window
+    */
+    function createToolboxLink(url, text, k, newWin)
+    {
+        var link = sj_ce("a");
+        link.href = url;
+        link.innerText = link.textContent = text;
+        if (newWin) {
+            link.target = "_blank";
+        }
+
+        if (k)
+        {
+            sj_be(link, "mousedown", function () { return si_T('&ID=' + k); });
+        }
+
+        return link;
+    }
+
+    /**
+    * Registers a string of CSS on the page
+    * @private
+    * @param {DOM} AddedCss  The CSS being added to the page
+    */
+    function registerCSSResources(addedCss)
+    {
+        if (addedCss)
+        {
+            var st = _ge("cp_style");
+            if (!st)
+            {
+                st = sj_ce("style", "cp_style");
+                _d.getElementsByTagName("head")[0].appendChild(st);
+            }
+
+            if ( st.textContent !== undefined )
+            {
+                st.textContent += addedCss;
+            }
+            else
+            {
+                st.styleSheet.cssText += addedCss;
+            }
+        }
+    }
+
+    /**
+    * Finds a descendant element by class name.
+    * @param className The className to match (required).
+    * @param element The parent element. Defaults to document if not provided (optional).
+    * @param tagName The filtering tag name. Default to * if not provided (optional).
+    * @returns The first matching tag if found, undefined otherwise.
+    */
+    function findDescendantByClassName(className, element, tagName)
+    {
+        // Verify required params.
+        if (typeof className !== "string")
+        {
+            return;
+        }
+
+        // Verify optional params and fallback to defaults if not provided.
+        var element = element || _d,
+            tagName = tagName || "*",
+            tags = element.getElementsByTagName(tagName);
+
+        for (var i = 0, length = tags.length; i < length; i++)
+        {
+            var tag = tags[i],
+                tagClassName = tag.className;
+
+            if (tagClassName && tagClassName.indexOf(className) !== -1)
+            {
+                return tag;
+            }
+        }
+    }
+
+    /**
+    * Walks from a given element to find the caption container associated with it.
+    * @private
+    * @param {DOM} element  The element to start at
+    */
+    function findCaptionFromElement(element)
+    {
+        while (element && !hasMatchingClass(element, _capParentClassnames))
+        {
+            element = element.parentNode;
+        }
+        return element;
+    }
+
+    /**
+    * Checks the element to see if it has a class that matches the expectedClass
+    * @private
+    * @param {DOM} element         The element to inspect
+    * @param {DOM} excpectedClasses  The classes to look for
+    */
+    function hasMatchingClass(element, expectedClasses)
+    {
+        if (element && element.className) {
+            for (var i = 0; i < expectedClasses.length; i++) {
+                if (element.className.indexOf(expectedClasses[i]) >= 0) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+    * Finds a child element under the supplied parent where the supplied attribute has the given value.
+    * @private
+    * @param {DOM} parent     The parent element to search under
+    * @param {DOM} attribute  The attribute to inspect
+    * @param {DOM} value      (optional) The value to find, or don't supply the parameter to check for simple existence of the attribute
+    */
+    function childWhere(parent, attribute, value)
+    {
+        var anyValue = typeof (value) == "undefined";
+
+        if (parent)
+        {
+            for (var i = 0; i < parent.childNodes.length; i++)
+            {
+                var child = parent.childNodes[i];
+                var attributeValue = getAttribute(child, attribute);
+                var target = ((anyValue && attributeValue) || (!anyValue && attributeValue == value)) ? child : 0;
+
+                if (!target && child.childNodes && child.childNodes.length)
+                {
+                    target = childWhere(child, attribute, value);
+                }
+
+                if (target)
+                {
+                    return target;
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+    * Retrieves an attribute from the given element.  Used for cross-browser compat.
+    * @private
+    * @param {DOM} element    The element to look for an attribute on
+    * @param {DOM} attribute  The attribute to retrive
+    */
+    function getAttribute(element, attribute)
+    {
+        return (element && element.getAttribute) ? element.getAttribute(attribute) : null;
+    }
+
+    /**
+    * Instruments the opening of a toolbox for a given caption.
+    * Currently fires only one event per caption to record that the toolbox was opened without spamming logs.
+    * @private
+    * @param {DOM} caption    The caption to instrument
+    */
+    function instrumentOpen(caption)
+    {
+        if (caption && !caption.tlbxLog)
+        {
+            // Client-side instrumentation
+            // Get the K value of the algo
+            var k;
+            var heads = caption.getElementsByTagName("h3");
+            if (heads.length && heads[0].childNodes.length)
+            {
+                var anchor = heads[0].childNodes[0];
+                k = getAttribute(anchor, "h");
+                if (!k)
+                {
+                    var omd = getAttribute(anchor, "onmousedown");
+                    if (omd)
+                    {
+                        var kMatches = omd.toString().match(/(ID=[^']+)/i);
+                        if (kMatches && kMatches.length > 1)
+                        {
+                            k = kMatches[1];
+                        }
+                    }
+                }
+            }
+
+            // Send an instrumentation event to the server
+            if (k)
+            {
+                // Trim off leading IG=
+                k = k.substring(k.indexOf("=")+1);
+                (new Image).src = _G.lsUrl + '&Type=Event.ClientInst' + '&DATA=[{"T":"CI.Hover","Name":"ToolboxOpen","K":"' + k + '","HType":"h"}]';
+            }
+
+            caption.tlbxLog = 1;
+        }
+    }
+
+    Init();
+    
+    return {}
+} ();

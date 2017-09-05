@@ -1,0 +1,1131 @@
+define("ajax.shared", ["require", "exports"], function (require, exports) {
+    ///<reference path="..\ajax.keymap.d.ts"/>
+    ///<reference path="..\..\..\..\..\Shared\Content\Content\Script\Declarations\Shared.d.ts"/>
+    function getPlaceholder(key) {
+        var placeholderKey = keyMap[key] ? keyMap[key] : keyMap.Prefix + key;
+        var placeholder = document.getElementById(placeholderKey);
+        if (!placeholder && document.getElementsByClassName) {
+            var holderClass = document.getElementsByClassName(placeholderKey);
+            placeholder = holderClass && holderClass.length ? holderClass[0] : null;
+        }
+        return placeholder;
+    }
+    exports.getPlaceholder = getPlaceholder;
+    function getRelativeUrl(url) {
+        var a = sj_ce('a');
+        a.href = url;
+        var allowedPath = a.pathname;
+        if (allowedPath[0] !== '/') {
+            allowedPath = "/" + allowedPath;
+        }
+        var relativeUrl = "";
+        if (allowedPath === "/") {
+            relativeUrl = allowedPath;
+        }
+        else {
+            var index = url.indexOf(allowedPath);
+            relativeUrl = index > -1 ? url.substr(index) : "";
+        }
+        return relativeUrl;
+    }
+    exports.getRelativeUrl = getRelativeUrl;
+    function getParentContainer(target, tagName, tag) {
+        for (; target && target !== document; target = target.parentNode) {
+            if (target[tagName] === tag) {
+                return target;
+            }
+            if (target === undefined) {
+                break;
+            }
+        }
+    }
+    exports.getParentContainer = getParentContainer;
+    ;
+});
+;define("ajax.cache", ["require", "exports"], function (require, exports) {
+    ///<reference path="ajax.keyMap.d.ts"/>
+    ///<reference path="..\..\..\..\Shared\Content\Content\Script\Declarations\Shared.d.ts"/>
+    var tweenDropDownClass = "ftrD";
+    var cookies = require("cookies");
+    var dom = require("dom");
+    var customEvents = require("event.custom");
+    var helper = require("ajax.shared");
+    var sessionStoragePrefix = "bing#";
+    var sessionStorageIndexPrefix = "bingi#";
+    var sessionStoragePageCountPrefix = "bingc#";
+    var sessionStorageIndexName = "bingIndex";
+    var streamCache = [];
+    var maxCacheSize = 10;
+    var currentUrl = helper.getRelativeUrl(window.location.href);
+    exports.hasStorage = true;
+    function cacheItem(callbackId, key, url, value) {
+        if (callbackId >= 0) {
+            var cacheObject = getCacheObject(callbackId);
+            switch (key) {
+                case "Script":
+                    cacheObject["ScriptHolder"].push(value);
+                    break;
+                case "Style":
+                    cacheObject["Style"] += value;
+                    break;
+                case "EOS":
+                    // Ensure that Script object appears at the end, after all the markup
+                    cacheObject["Script"] = cacheObject["ScriptHolder"];
+                    delete cacheObject["ScriptHolder"];
+                    cacheObject[key] = value;
+                    store(url, cacheObject);
+                    break;
+                default:
+                    cacheObject[key] = value;
+            }
+        }
+    }
+    exports.cacheItem = cacheItem;
+    function fetch(url) {
+        var cachedResponse = sessionStorage.getItem(sessionStoragePrefix + url);
+        return cachedResponse ? JSON.parse(cachedResponse) : null;
+    }
+    exports.fetch = fetch;
+    function store(url, json) {
+        if (_G.JCache) {
+            // Here pages are cached based on JCache signal that is sent down only if
+            // cache control header is set to private.
+            addToSessionStorage(sessionStoragePrefix + url, JSON.stringify(json));
+        }
+        json = {}; // free up memory
+    }
+    function checkCacheBust(key) {
+        var storageKey = sessionStoragePrefix + key;
+        var cacheItem = sessionStorage.getItem(storageKey);
+        if (cacheItem) {
+            var cacheObject = JSON.parse(cacheItem);
+            var IG = cacheObject ? cacheObject.IG : "-1";
+            if (_G.IG !== IG) {
+                sj_log("CI.Ajax", "Cache", IG);
+            }
+        }
+    }
+    function addToSessionStorage(key, value) {
+        var sessionStorageIndex = sessionStorage.getItem(sessionStorageIndexName);
+        sessionStorageIndex = sessionStorageIndex ? parseInt(sessionStorageIndex) : 1;
+        var sessionStorageIndexKey = sessionStorageIndexPrefix + sessionStorageIndex;
+        // If cachedUrl exsists this means the max cache size has been reached and
+        // we need to remove the oldest cached item which is cachedUrl itself.
+        var cachedUrl = sessionStorage.getItem(sessionStorageIndexKey);
+        if (cachedUrl) {
+            sessionStorage.removeItem(cachedUrl);
+        }
+        sessionStorage.setItem(sessionStorageIndexKey, key);
+        sessionStorage.setItem(key, value);
+        sessionStorageIndex = sessionStorageIndex >= maxCacheSize ? 1 : sessionStorageIndex + 1;
+        sessionStorage.setItem(sessionStorageIndexName, sessionStorageIndex);
+    }
+    function getCacheObject(id) {
+        // Ensure we've stream cache correctly initialized
+        while (id >= streamCache.length) {
+            streamCache.push({ Style: "", SearchForm: "", Content: "", ScriptHolder: [] });
+        }
+        return streamCache[id];
+    }
+    // One-time initialization to cache direct navigation page
+    function init() {
+        checkSessionStorage();
+        if (!exports.hasStorage) {
+            return;
+        }
+        if (!_w["JSON"] || !_w["keyMap"]) {
+            return;
+        }
+        // Move all styles to a container
+        var styles = document.body.getElementsByTagName("style");
+        var cssHolder = dom.getCssHolder();
+        for (var i = 0; i < styles.length; i++) {
+            var style = styles[i];
+            if (style.parentElement === document.body && !style.hasAttribute("data-rms")) {
+                cssHolder.appendChild(style);
+            }
+        }
+        checkCacheBust(currentUrl);
+        if (_G.JCache) {
+            var json = getCurrentSessionInfo();
+            store(json.Url, json);
+        }
+        customEvents.unbind("onP1", init);
+    }
+    function checkSessionStorage() {
+        try {
+            sessionStorage.setItem(sessionStoragePrefix, sessionStoragePrefix);
+            sessionStorage.removeItem(sessionStoragePrefix);
+            exports.hasStorage = true;
+        }
+        catch (e) {
+            exports.hasStorage = false;
+        }
+    }
+    function getCurrentSessionInfo() {
+        var styleCache = "";
+        var styles = document.body.getElementsByTagName("style");
+        for (var i = 0; i < styles.length; i++) {
+            var style = styles[i];
+            if (!style.hasAttribute("data-rms")) {
+                styleCache += style.outerHTML;
+            }
+        }
+        var scriptCache = [];
+        scriptCache.push({ Content: getGlobalVariables() + "_G.ST=new Date;" });
+        var scripts = document.body.getElementsByTagName("script");
+        for (var i = 0; i < scripts.length; i++) {
+            var script = scripts[i];
+            if (!script.hasAttribute("data-rms") && !script.hasAttribute("data-ajaxResKey") && script.type !== "text/rms") {
+                var scriptSrc = script.src;
+                scriptCache.push({
+                    Content: scriptSrc ? scriptSrc : removeRmsKeys(script.text),
+                    Method: scriptSrc ? "reference" : "inline"
+                });
+            }
+        }
+        var embDivCache = "";
+        if (document.querySelectorAll) {
+            var embDivs = document.querySelectorAll("div[id^=emb]");
+            if (embDivs.length) {
+                var embDivParent = document.createElement("div");
+                embDivParent.id = "b_EmbDivs";
+                embDivParent.className = "b_hide";
+                document.body.appendChild(embDivParent);
+                for (var i = 0; i < embDivs.length; i++) {
+                    var embDiv = embDivs[i];
+                    var id = embDiv.id;
+                    if (id.substr(id.length - 3) === "DIV") {
+                        embDivParent.appendChild(embDiv);
+                    }
+                }
+                embDivCache = embDivParent.outerHTML;
+            }
+        }
+        // Generate cache for current page
+        var jsonObj = {
+            Style: styleCache,
+            scopebar: getOuterHtml("scopebar"),
+            Identity: getOuterHtml("Identity"),
+            SearchForm: _G.SRF,
+            Content: _G.CNT,
+            RmsDefer: getOuterHtml("RmsDefer"),
+            EmbDivs: embDivCache,
+            IG: _G.IG,
+            Title: document.title,
+            Url: currentUrl,
+            Script: scriptCache,
+            HBop: getTweenDropDowns(),
+            EOS: 1
+        };
+        if (embDivCache === "") {
+            delete jsonObj.EmbDivs;
+        }
+        return jsonObj;
+    }
+    function getGlobalVariables() {
+        var globalVariables = [];
+        for (var k in _G) {
+            // Due to sessionStorage limites only saving properties that are small strings
+            // that do not contain qoutes. This should be all we need because the globalsscripts
+            // answer only has simple strings in _G. The other properties added on to _G
+            // like C1, CNT etc are added via script that will get replayed.
+            var val = _G[k];
+            if (typeof val === "string" && val.length < 100 && val.indexOf('"') === -1) {
+                globalVariables.push(k + ":\"" + _G[k] + "\"");
+            }
+        }
+        return "var _G={" + globalVariables.join(",") + "};";
+    }
+    function removeRmsKeys(content) {
+        //BUGBUG: 1001837 Remove this hardcoding. The RmsKeys that
+        //have to be removed should be provided by framework.
+        var rmsIndex = content.indexOf("_w.rms.js");
+        if (rmsIndex === -1) {
+            return content;
+        }
+        var rmsKeys = [];
+        if (_w["keyMap"]) {
+            rmsKeys = keyMap.RmsKeys;
+        }
+        for (var i = 0; i < rmsKeys.length; i++) {
+            var rmsKey = rmsKeys[i];
+            var keyIndex = content.indexOf(rmsKey, rmsIndex);
+            if (keyIndex === -1) {
+                continue;
+            }
+            var startIndex = content.lastIndexOf("{", keyIndex);
+            var endIndex = content.indexOf("}", keyIndex);
+            if (startIndex === -1 || endIndex === -1 || startIndex < rmsIndex) {
+                continue;
+            }
+            endIndex += content[endIndex + 1] === "," ? 2 : 1;
+            var value = content.substring(startIndex, endIndex);
+            content = content.replace(value, "");
+        }
+        return content;
+    }
+    function getOuterHtml(key) {
+        var elem = helper.getPlaceholder(key);
+        return elem ? elem.outerHTML : "";
+    }
+    function getTweenDropDowns() {
+        var dropdownsHTML = "";
+        if (document.getElementsByClassName) {
+            var dropdowns = document.getElementsByClassName(tweenDropDownClass);
+            for (var d = 0; d < dropdowns.length; d++) {
+                var dropdown = dropdowns[d];
+                dropdownsHTML += dropdown.parentElement.outerHTML;
+            }
+        }
+        return dropdownsHTML;
+    }
+    // First run
+    customEvents.bind("onP1", init, true);
+});
+;///<amd-module name="ajax.history" />
+///<reference path="..\..\..\..\Shared\Content\Content\Script\Declarations\Shared.d.ts"/>
+define("ajax.history", ["require", "exports"], function (require, exports) {
+    var customEvents = require("event.custom");
+    var nativeEvents = require("event.native");
+    var allowedPath = "/search";
+    var homepagePath = "/";
+    var nullVal = null;
+    function pushState(url) {
+        history.pushState(nullVal, nullVal, url);
+    }
+    exports.pushState = pushState;
+    function replaceState(url) {
+        history.replaceState(nullVal, nullVal, url);
+    }
+    exports.replaceState = replaceState;
+    function loadState() {
+        var _location = _w.location;
+        var _href = _location.href;
+        var isSearchPath = _href.indexOf(allowedPath);
+        if (isSearchPath >= 0) {
+            var currentUrl = _href.substr(isSearchPath);
+            customEvents.fire("ajax.state", currentUrl);
+        }
+        else if (_location.pathname === homepagePath) {
+            _w.sj_lc(homepagePath);
+        }
+    }
+    nativeEvents.bind(_w, "popstate", loadState, false);
+});
+;define("ajax.maskBase", ["require", "exports"], function (require, exports) {
+    ///<reference path="..\ajax.keymap.d.ts"/>
+    var customEvents = require("event.custom");
+    var helper = require("ajax.shared");
+    var maskId = "ajaxMaskLayer";
+    var mask;
+    function addAjaxStyles(styles) {
+        var style = document.createElement("style");
+        style.setAttribute("data-rms", "1");
+        document.body.appendChild(style);
+        var styletext = "#" + maskId + styles;
+        // In IE10 & IE11 touching on an anchor tag starts a request for the resource before
+        // actually trigerring the click. This can be mitigated by using touch-action.
+        styletext += "a,a *{-ms-touch-action:manipulation;touch-action:manipulation}";
+        if (style.textContent !== undefined) {
+            style.textContent = styletext;
+        }
+        else if (style.styleSheet) {
+            style["styleSheet"]["cssText"] += styletext;
+        }
+    }
+    exports.addAjaxStyles = addAjaxStyles;
+    function tryGetMask() {
+        mask = document.getElementById(maskId);
+        return mask ? true : false;
+    }
+    function addMask() {
+        var instant = require("ajax.instant");
+        if (!(instant && instant.enabled)) {
+            // Note: It looks like there are no scenarios, in which AutoSuggest 
+            // wouldn't remove its dropdown menu by itself and manual removal is required.
+            // Removing this function behind a binginstant feature.
+            removeAutoSuggest();
+        }
+        var contentDiv = document.getElementById(keyMap.Content);
+        if (!contentDiv) {
+            return;
+        }
+        var rect = contentDiv.getBoundingClientRect();
+        var width = rect.width ? Math.abs(rect.right - rect.left) : rect.width;
+        var paddingLeft = getStyle(contentDiv, "paddingLeft");
+        width = width - (paddingLeft ? parseInt(paddingLeft) : 0);
+        var height = rect.height ? Math.abs(rect.bottom - rect.top) : rect.height;
+        var format = "px";
+        // If user navigates quickly between pages a content mask may already be present.
+        if (!tryGetMask()) {
+            mask = document.createElement("div");
+            mask.setAttribute("id", maskId);
+        }
+        mask.style.height = height + format;
+        mask.style.width = width + format;
+        var childNodes = contentDiv.childNodes;
+        if (childNodes && childNodes.length) {
+            contentDiv.insertBefore(mask, childNodes[0]);
+        }
+    }
+    exports.addMask = addMask;
+    function getStyle(elem, property) {
+        var computedStyle;
+        if (window.getComputedStyle) {
+            computedStyle = getComputedStyle(elem, null);
+        }
+        else if (elem.currentStyle) {
+            computedStyle = elem.currentStyle;
+        }
+        else {
+            return null;
+        }
+        return computedStyle[property];
+    }
+    function removeAutoSuggest() {
+        var autoSug = helper.getPlaceholder("AutoSug");
+        var searchForm = helper.getPlaceholder("SearchForm");
+        var header = helper.getPlaceholder("header");
+        if (autoSug && searchForm && header) {
+            autoSug.style.display = "none";
+            searchForm.className = "";
+            header.className = "";
+        }
+    }
+    function removeMask() {
+        if (tryGetMask()) {
+            mask.parentNode.removeChild(mask);
+        }
+    }
+    exports.removeMask = removeMask;
+    function updateMask(styles) {
+        if (tryGetMask()) {
+            for (var styleName in styles) {
+                mask.style[styleName] = styles[styleName];
+            }
+        }
+    }
+    exports.updateMask = updateMask;
+    function hasMask() {
+        return tryGetMask();
+    }
+    exports.hasMask = hasMask;
+    function scrollToTop() {
+        // window.scrollTo function is prone to cause errors
+        // Trying to keep the rendering safe by catching the
+        // exception
+        try {
+            window.scrollTo(0, 0);
+        }
+        catch (e) {
+        }
+    }
+    exports.scrollToTop = scrollToTop;
+});
+;///<amd-module name="ajax.noMask" />
+define("ajax.noMask", ["require", "exports", "ajax.maskBase"], function (require, exports, mask) {
+    var customEvents = require("event.custom");
+    function initialize() {
+        mask.addAjaxStyles("{position:absolute;background-color:white;opacity:0;z-index:-1}");
+        customEvents.unbind("onP1", initialize);
+    }
+    customEvents.bind("onP1", initialize, true);
+    customEvents.bind("ajax.requestSent", mask.addMask);
+    customEvents.bind("ajax.firstChunkEnd", function () {
+        mask.updateMask({ zIndex: "10" });
+    });
+    customEvents.bind("ajax.load", function () {
+        mask.scrollToTop();
+    });
+});
+;define("ajax.framework", ["require", "exports", "ajax.cache", "ajax.history"], function (require, exports, cache, history) {
+    ///<reference path="..\ajax.keymap.d.ts"/>
+    ///<reference path="..\..\..\..\..\Shared\Content\Content\Script\Declarations\Shared.d.ts"/>
+    var cookies = require("cookies");
+    var dom = require("dom");
+    var env = require("env");
+    var customEvents = require("event.custom");
+    var nativeEvents = require("event.native");
+    var shared = require("shared");
+    var rms = require("rmsajax");
+    var helper = require("ajax.shared");
+    var iframe = null;
+    var persistentNode;
+    var allowedPath = "/search";
+    var sid = _G.SID;
+    var format = "snrjson";
+    var pendingStyleBackup = false;
+    var origin = { Click: 1, History: 2, AS: 3 };
+    var lastRenderedOrigin = origin.Click;
+    var lastRenderedUrl = helper.getRelativeUrl(window.location.href);
+    var pendingRequestUrls = [];
+    var renderedKeys = [];
+    var sentKeys = [];
+    // The following namespaces have to be reloaded when there is new content.
+    // These namespaces will be deleted when a new ajax request is started.
+    var jsNamespaceBlacklist = ["Bnp", "RMS_IACL", "sched", "TP", "bepns", "Identity", "initComCtrl", "ccal", "ccal_bundle", "expitem", "si_sendCReq"];
+    var divClassNameBlackList = ["bubblePlaceholder", "irhc", "vrhc"];
+    var maskId = "ajaxMaskLayer";
+    var _undefined;
+    var timeoutId = null;
+    // 99th percentile PLT is about 9000-9500ms.
+    // Setting max timeout to approximately the same.
+    var timeout = 10000;
+    var requeryTimeout = 30;
+    // For removing sid, format and jsoncbid parameters
+    var urlRegex = /(&|%26)sid(=|%3d)\w+(&|%26)format(=|%3d)(jsonv2|snrjson)(&|%26)jsoncbid(=|%3d)\d+/gm;
+    // For removing ajax, axid, pIF and ajaxNode Id parameters
+    var persistentAjaxUrlRegex = /((&|%26)ajax(=|%3d)\w+(&|%26)axID(=|%3d)\w+)|((&|%26)pIG(=|%3d)\w+)|((&|%26)axNID(=|%3d)(\w|[,.])+)/gm;
+    // For checking if query has at least one non whitespace character
+    var queryRegex = /\S/;
+    // Value to check if autosuggest is turned on.
+    var autoSuggest;
+    var persistentRequestCount = 0;
+    // div tag used to decode html encoding
+    var htmlDecodeDiv = sj_ce("div");
+    var hasOnPPFired;
+    var lastFetchedUrl;
+    var lastTime = si_ST;
+    var persistentNodeAttribute = "data-ajax";
+    // Phase and debug is used to indicate the current rendering state.
+    // If we cause an error we send back the phase of rendering where failiure happened.
+    var phase;
+    var errorEncountered = false;
+    var PHASE_RENDER_BEGIN = 10;
+    var PHASE_UNLOAD_DONE = 20;
+    var PHASE_SENDING_REQUEST = 30;
+    var PHASE_ADDING_MASK = 40;
+    var PHASE_CACHELOAD = 50;
+    var REQUEST_FAIL = 60;
+    var REQUEST_TIMEOUT = 70;
+    var failedParameter = "&ajf=";
+    var referencedOnceScripts = {};
+    var requestMetadata = {};
+    function init() {
+        var popstatesupport = ("onpopstate" in _w) && _w.history && _w.history.pushState;
+        // If _G.SID is not present then request is not coming from edge and requires old jsonv2 format
+        if (!sid) {
+            sid = cookies.get("_SS", "SID");
+            format = "jsonv2";
+        }
+        // It is possible due to some error keyMap is not laoded.
+        // The ajax framework is wired up only if it is present.
+        if (_w["keyMap"] && cache.hasStorage && _w["JSON"] && document.getElementsByClassName && sid && popstatesupport && shared) {
+            autoSuggest = cookies.get("SRCHHPGUSR", "AS");
+            wireup();
+            customEvents.bind("ajax.state", handleHistoryChange);
+            // Disabling escape key for ajax scenario
+            nativeEvents.bind(document, "keydown", function (evt) {
+                if (evt.keyCode === 27) {
+                    shared.preventDefault(evt);
+                }
+            });
+            if (document.querySelectorAll) {
+                var referencedOnceScriptTags = document.querySelectorAll("script[data-ajaxResKey]");
+                for (var i = 0; i < referencedOnceScriptTags.length; i++) {
+                    referencedOnceScripts[referencedOnceScriptTags[i].getAttribute("data-ajaxResKey")] = true;
+                }
+            }
+            // this is used in GPing redirection code to check whether it's running on an AJAX SERP page
+            _w["sj_isAjax"] = true;
+            customEvents.fire("ajaxReady");
+        }
+        if (!cache.hasStorage || !popstatesupport || !sid) {
+            var errText = !cache.hasStorage ? "SS NA " : "";
+            errText += !popstatesupport ? "History NA" : "";
+            errText += !sid ? "SID NA" : "";
+            sj_log("CI.Ajax", "H5Support", errText);
+            setH5CompCookie();
+        }
+        customEvents.unbind("onP1", init);
+    }
+    function wireup() {
+        // If anything goes wrong in AjaxSERP flight, fall back to default flight for the session
+        customEvents.bind("ErrorInstrumentation", function () { setH5CompCookie(); });
+        customEvents.bind("LayoutError", function () { setH5CompCookie(); });
+        // Different logic for homepage where we render the SERP header invisibly in addition to the homepage header - there are multiple search forms
+        if (keyMap.IsHP) {
+            var searchForms = document.getElementsByTagName("form");
+            for (var i = 0; i < searchForms.length; i++) {
+                if (searchForms[i].id === "sb_form") {
+                    setSubmitHandlerForForm(searchForms[i], handleSearchForm);
+                }
+            }
+        }
+        else {
+            var searchForm = document.getElementById("sb_form");
+            if (searchForm) {
+                setSubmitHandlerForForm(searchForm, handleSearchForm);
+            }
+        }
+        document.onclick = clickHandler;
+        // Wireup location change script
+        window["sj_lc"] = function (url, originInput, persistentEl) { handleLocationChange(url, origin.AS, persistentEl); };
+    }
+    function setSubmitHandlerForForm(form, handler) {
+        nativeEvents.bind(form, "submit", handleSearchForm);
+        customEvents.bind("autoSugLoaded", function () { nativeEvents.unbind(form, "submit", handleSearchForm); form.submit = handleSearchForm; }, true);
+    }
+    function removeWireup() {
+        document.onclick = null;
+        var searchForm = document.getElementById("sb_form");
+        nativeEvents.unbind(searchForm, "submit", handleSearchForm);
+        _w["sj_lc"] = function (url) { _w.location.assign(url); };
+        searchForm.submit = function () { var url = getUrlFromSearchForm(); url && _w.location.assign(url); };
+        _w["sj_isAjax"] = false;
+    }
+    function setH5CompCookie() {
+        if (!errorEncountered) {
+            var errorCount = parseInt(cookies.get("_SS", "h5comp"));
+            if (isNaN(errorCount)) {
+                errorCount = -1;
+            }
+            removeWireup();
+            errorCount = errorCount > 2 ? 3 : errorCount + 1;
+            errorEncountered = true;
+            cookies.set("_SS", "h5comp", errorCount, false, "/");
+        }
+    }
+    // Wireup onClick handler to activate AJAX experience
+    function clickHandler(evt) {
+        // We ignore handling the click for the following cases
+        // 1) The click was already prevented from doing default behavior by some other feature on the page.
+        // 2) The control key/shift key was pressed along with click, which indicates user was trying to open in new tab/window
+        // 3) The click was due to a right button click. (Firefox fires the click event even for a right click)
+        // 4) The url pointed to by the anchor tag is not going to serp vertical.
+        // 5) The url pointed to by the anchor tag is same as the current page url.
+        if (!evt.defaultPrevented && !evt.ctrlKey && !evt.shiftKey && evt.button === 0) {
+            var element = evt.target;
+            var targetElement = helper.getParentContainer(element, "tagName", "A");
+            if (targetElement && (targetElement.target === "_self" || !targetElement.target) && targetElement.getAttribute("data-noajax") !== "1") {
+                var destinationPath = targetElement.pathname;
+                var destionationProtocol = targetElement.protocol ? targetElement.protocol : location.protocol;
+                var destinationHostname = targetElement.hostname ? targetElement.hostname : location.hostname; // automatically accquire current domain for relative links
+                var destinationLink = targetElement.href;
+                // If any links have a sid, format and jsoncbid property on them, we need to remove it
+                destinationLink = destinationLink.replace(urlRegex, "");
+                if (keyMap.FeaturePersist) {
+                    persistentNode = getPersistentNode(targetElement);
+                    destinationLink = destinationLink.replace(persistentAjaxUrlRegex, "");
+                }
+                if (destinationLink) {
+                    targetElement.href = destinationLink;
+                }
+                if (destinationHostname === location.hostname && destinationPath.indexOf(allowedPath) === 0 && location.protocol === destionationProtocol) {
+                    // Make link relative
+                    destinationLink = removeHash(destinationLink.substr(destinationLink.indexOf(allowedPath)));
+                    if (destinationLink !== removeHash(lastRenderedUrl)) {
+                        destinationLink = emitPersistentNodeToUrlIfExists(destinationLink);
+                        renderSERP(destinationLink, origin.Click);
+                        evt.preventDefault();
+                    }
+                }
+            }
+        }
+    }
+    function emitPersistentNodeToUrlIfExists(destinationLink) {
+        if (persistentNode) {
+            persistentRequestCount++;
+            destinationLink += "&ajax=" + persistentNode.getAttribute(persistentNodeAttribute);
+            destinationLink += "&axID=" + persistentRequestCount;
+            var pIG = persistentNode.getAttribute("data-ajax-pig");
+            if (pIG) {
+                destinationLink += "&pIG=" + pIG;
+            }
+            var nodeId = persistentNode.getAttribute("data-ajax-nid");
+            if (nodeId) {
+                destinationLink += "&axNID=" + nodeId;
+            }
+        }
+        return destinationLink;
+    }
+    function getPersistentNode(element) {
+        while (element && element !== document.body) {
+            if (element.hasAttribute(persistentNodeAttribute)) {
+                if (element.getAttribute(persistentNodeAttribute)) {
+                    return element;
+                }
+                else {
+                    return null;
+                }
+            }
+            element = element.parentNode;
+        }
+        return null;
+    }
+    // Define callback for JSON response
+    function callback(json, callbackId, url) {
+        if (url !== lastFetchedUrl) {
+            lastFetchedUrl = url;
+        }
+        for (var key in json) {
+            if (key === "Script") {
+                for (var i = 0; i < json[key].length; i++) {
+                    var script = json[key][i];
+                    fireCallback(callbackId, key, url, script);
+                }
+            }
+            else {
+                fireCallback(callbackId, key, url, json[key]);
+            }
+        }
+    }
+    function fireCallback(callbackId, key, url, value) {
+        renderItem(callbackId, key, url, value);
+        cache.cacheItem(callbackId, key, url, value);
+    }
+    function renderItem(callbackId, key, url, value) {
+        if (url === lastRenderedUrl) {
+            switch (key) {
+                case "Script":
+                    if (value["Method"] === "reference") {
+                        dom.includeScriptReference(value["Content"]);
+                    }
+                    else if (value["Method"] === "referenceOnce") {
+                        var scriptKey = value["Key"];
+                        if (!referencedOnceScripts[scriptKey]) {
+                            dom.includeScriptReference(value["Content"]);
+                            referencedOnceScripts[scriptKey] = true;
+                        }
+                    }
+                    else {
+                        dom.includeScript(value["Content"]);
+                    }
+                    break;
+                case "Style":
+                    backupStyles();
+                    dom.getCssHolder().innerHTML += '<div></div>' + value;
+                    break;
+                case "IG":
+                    _G.IG = value;
+                    break;
+                case "Title":
+                    htmlDecodeDiv.innerHTML = value;
+                    document.title = htmlDecodeDiv.innerText;
+                    break;
+                case "EOS":
+                    endOfStream(url);
+                    break;
+                case "HBop":
+                    var div = document.createElement("div");
+                    document.getElementById(keyMap.Content).appendChild(div);
+                    div.outerHTML = value;
+                    renderedKeys.push(key);
+                    break;
+                case "RmsDefer":
+                case "EmbDivs":
+                    var containerDiv = helper.getPlaceholder(key);
+                    if (!containerDiv) {
+                        containerDiv = document.createElement("div");
+                        document.body.appendChild(containerDiv);
+                    }
+                    containerDiv.outerHTML = value;
+                    break;
+                case "Content":
+                    if (keyMap.FeaturePersist && persistentNode) {
+                        // Logic to check for persistent markup based on query string / payload
+                        var pFragement = document.createDocumentFragment();
+                        var div = document.createElement("div");
+                        pFragement.appendChild(div);
+                        div.innerHTML = value;
+                        var persistentElementPlaceHolder = pFragement.querySelector("#persistent" + persistentNode.getAttribute(persistentNodeAttribute));
+                        if (persistentElementPlaceHolder) {
+                            persistentElementPlaceHolder.parentNode.replaceChild(persistentNode, persistentElementPlaceHolder);
+                        }
+                        var placeholder = helper.getPlaceholder(key);
+                        if (placeholder) {
+                            placeholder.parentNode.replaceChild(div.firstChild, placeholder);
+                            renderedKeys.push(key);
+                        }
+                        customEvents.fire("ajax.persist");
+                    }
+                    else {
+                        appendContent(key, value);
+                    }
+                    customEvents.fire("ajax.contentEnd");
+                    // Content is the first visible difference to user. When content is
+                    // rendered the user can interact with page again. Hence clearing
+                    // request timeout at this point.
+                    if (timeoutId !== null) {
+                        sb_ct(timeoutId);
+                        timeoutId = null;
+                    }
+                    break;
+                case "EOC":
+                    if (value === "1") {
+                        customEvents.fire("ajax.firstChunkEnd");
+                    }
+                    break;
+                case "Keys":
+                    sentKeys = value;
+                    break;
+                case "LangSwitch":
+                case "MarketSwitch":
+                    var div = document.createElement("div");
+                    document.body.appendChild(div);
+                    div.outerHTML = value;
+                    renderedKeys.push(key);
+                    break;
+                default:
+                    appendContent(key, value);
+            }
+        }
+    }
+    function endOfStream(url) {
+        if (iframe) {
+            var iframeOnload = iframe.onload;
+            // In case iframe onload does not fire for some reason we make sure to call onload function
+            var iframeOnloadTimeOut = sb_st(function () {
+                onload(url);
+                iframe.onload = function () { };
+            }, 1000);
+            iframe.onload = function () {
+                sb_ct(iframeOnloadTimeOut);
+                onload(url);
+                if (iframeOnload) {
+                    iframeOnload();
+                }
+            };
+        }
+        else {
+            onload(url);
+        }
+    }
+    function onload(url) {
+        if (helper.ajaxPerf) {
+            requestMetadata.performance = iframe && iframe.contentWindow && iframe.contentWindow.performance;
+        }
+        // In case si_PP doesn't fire onPP by itself we need to make sure onPP fires.
+        hasOnPPFired = false;
+        customEvents.bind("onPP", function () { return hasOnPPFired = true; });
+        sendPerfPing();
+        wireup();
+        cleanupStyles();
+        updateLocation(url);
+        env.setTimeout(function () { return afterRender(); }, 1);
+    }
+    function appendContent(key, value) {
+        var placeholder = helper.getPlaceholder(key);
+        if (placeholder) {
+            placeholder.outerHTML = value;
+            renderedKeys.push(key);
+        }
+    }
+    function sendPerfPing() {
+        _G.PPS = false;
+        // Since everything inside this is additional instrumentation we put it in a try
+        // catch block to make sure there is no error that no errors will hold up page.
+        try {
+            _G.BPT = new Date();
+            // If a muid sync has to be triggered fd injects si_sendCReq on
+            // the page.This function checks if si_sendCReq and calls it.
+            _w["lb"] && lb();
+            var contentWindow = iframe && iframe.contentWindow;
+            var iframePerf = helper.ajaxPerf ? requestMetadata.performance : contentWindow && contentWindow.performance;
+            var ajaxTimings = iframePerf && iframePerf.timing;
+            si_PP(new Date(), "L", ajaxTimings ? ajaxTimings : _undefined);
+        }
+        catch (e) {
+            // If error occoured then try sending the default perfping.
+            si_PP(new Date());
+        }
+    }
+    // Ajax Load Page
+    function beforeRender() {
+        customEvents.fire("unload");
+        customEvents.fire("ajax.unload");
+        errorEncountered = false;
+        env.clear();
+        // Clear out black listed javascript namespaces
+        shared.forEach(jsNamespaceBlacklist, function (jsNamespace) {
+            if (window.hasOwnProperty(jsNamespace)) {
+                window[jsNamespace] = _undefined;
+                delete window[jsNamespace];
+            }
+        });
+        shared.forEach(divClassNameBlackList, function (className) {
+            var el = document.getElementsByClassName(className);
+            for (var i = 0; i < el.length; i++) {
+                var element = el[i];
+                element.parentNode.removeChild(element);
+            }
+        });
+        clearMaps();
+        removeNotification();
+        customEvents.reset(getCustomEventsToPersist());
+        rms.reset();
+        renderedKeys = [];
+        sentKeys = [];
+    }
+    function getCustomEventsToPersist() {
+        var customEventsToPersist = null;
+        var customEventsToPersistRaw = persistentNode ? persistentNode.getAttribute("data-ajax-cetp") : "";
+        if (customEventsToPersistRaw) {
+            customEventsToPersist = {};
+            var splitter = customEventsToPersistRaw.split(",");
+            for (var i = 0; i < splitter.length; i++) {
+                customEventsToPersist[splitter[i]] = "";
+            }
+        }
+        return customEventsToPersist;
+    }
+    // Bug 1060372: Cleanup once there is a more effective way to clear out unnecessary global variables.
+    // Clear namespaces related to maps. Needed for map pins to work properly.
+    function clearMaps() {
+        if (window["Bing"] && Bing.hasOwnProperty("MapControl")) {
+            Bing.MapControl = _undefined;
+            delete Bing.MapControl;
+        }
+        if (window["$MapsNamespace"]) {
+            if (window.hasOwnProperty($MapsNamespace)) {
+                window[$MapsNamespace] = _undefined;
+                delete window[$MapsNamespace];
+            }
+        }
+    }
+    function afterRender() {
+        if (helper.ajaxPerf) {
+            customEvents.fire("ajax.load", requestMetadata);
+        }
+        else {
+            customEvents.fire("ajax.load");
+        }
+        customEvents.fire("onHTML");
+        if (!hasOnPPFired) {
+            customEvents.fire("onPP");
+        }
+        customEvents.fire("onP1Lazy");
+        if (helper.ajaxPerf) {
+            customEvents.fire("ajax.postload", requestMetadata);
+        }
+        else {
+            customEvents.fire("ajax.postload");
+        }
+        // Reset parameter object for the next request
+        requestMetadata = {};
+    }
+    function renderSERP(relativeUrl, origin) {
+        phase = PHASE_RENDER_BEGIN;
+        try {
+            lastRenderedUrl = relativeUrl;
+            lastRenderedOrigin = origin;
+            pendingStyleBackup = true;
+            beforeRender();
+            phase = PHASE_UNLOAD_DONE;
+            loadSERP(relativeUrl, origin);
+        }
+        catch (e) {
+            // If error happened when loading from cache, but content is available to user then do not do a manual requery
+            var condition = (phase === PHASE_CACHELOAD && !document.getElementById(maskId)) ? false : true;
+            var errorMessage = "" + e;
+            if (condition) {
+                manualRequery(relativeUrl, errorMessage, phase, origin);
+            }
+            else {
+                logError(errorMessage, phase);
+            }
+        }
+    }
+    function loadSERP(relativeUrl, originVal) {
+        if (pendingRequestUrls.indexOf(relativeUrl) === -1) {
+            var cachedResponse;
+            // Using the same iframe to load all the ajax request
+            // messes with the history API in IE.
+            if (iframe && iframe.parentNode) {
+                // Setting onload function to null because IE calls the onload
+                // function even after the frame is removed from dom.
+                iframe.onload = null;
+                iframe.parentNode.removeChild(iframe);
+                iframe = null;
+            }
+            if (originVal === origin.History && (cachedResponse = cache.fetch(relativeUrl))) {
+                phase = PHASE_CACHELOAD;
+                requestMetadata.fromCache = true;
+                callback(cachedResponse, -1, relativeUrl);
+            }
+            else {
+                requestMetadata.fromCache = false;
+                var callbackId = window["AjaxCB"].length;
+                phase = PHASE_SENDING_REQUEST;
+                pendingRequestUrls.push(relativeUrl);
+                var sidFromCookie = cookies.get("_SS", "SID");
+                if (sidFromCookie) {
+                    // try to update session id with latest value from cookie
+                    sid = sidFromCookie;
+                }
+                var jsonUrl = relativeUrl + (relativeUrl.indexOf("&sid=") === -1 ? ("&sid=" + sid) : "") + "&format=" + format + "&jsoncbid=" + callbackId;
+                iframe = document.createElement("iframe");
+                iframe.style.display = "none";
+                document.body.appendChild(iframe);
+                // Register callback and initialize an object for storing cache
+                window["AjaxCB"].push(function (json) {
+                    callback(json, callbackId, relativeUrl);
+                });
+                lastTime = new Date();
+                var fallbackFunc = function (errorPhase, originVal) {
+                    // If the masklayer is still present then content was not rendered
+                    // Hence do a manual requery because this implies ajax request failed.
+                    return function () {
+                        if (document.getElementById(maskId)) {
+                            var metaInfo = "RK:" + renderedKeys.join(",") + " SK:" + sentKeys.join(",") + " U:" + escape(jsonUrl);
+                            manualRequery(relativeUrl, "FailedRequest", errorPhase, originVal, metaInfo);
+                        }
+                    };
+                };
+                iframe.onload = fallbackFunc(REQUEST_FAIL, lastRenderedOrigin);
+                // For firefox the full url needs to be provided.
+                var fullUrl = window.location.protocol + "//" + window.location.host + jsonUrl;
+                // Using src instead of location.assign because without src safari does not send request referrer.
+                iframe.src = fullUrl;
+                // Do a manual page redirect if it does not load within timeout.
+                timeoutId = env.setTimeout(fallbackFunc(REQUEST_TIMEOUT, lastRenderedOrigin), timeout);
+                phase = PHASE_ADDING_MASK;
+                customEvents.fire("ajax.requestSent", relativeUrl);
+            }
+        }
+    }
+    function manualRequery(url, error, errorPhase, originVal, metaInfo) {
+        logError(error, errorPhase, metaInfo);
+        // The ping will be cancelled if the page is redirected immediately in webkit browsers.
+        url = url + failedParameter + errorPhase;
+        var requeryFunc = "assign";
+        if (originVal === origin.History) {
+            requeryFunc = "replace";
+        }
+        lastRenderedUrl = "";
+        if (iframe) {
+            iframe.onload = null;
+        }
+        env.setTimeout(function () { return window.location[requeryFunc](url); }, requeryTimeout);
+    }
+    function logError(error, errorPhase, metaInfo) {
+        if (errorPhase < REQUEST_FAIL && typeof (window.onerror) === "function") {
+            window.onerror(error, "Ajax.Bundle", errorPhase);
+        }
+        else {
+            var key = "Ajax";
+            if (metaInfo) {
+                key += '","Meta":"' + metaInfo;
+            }
+            sj_log("CI.Error", key, error + errorPhase);
+            setH5CompCookie();
+        }
+    }
+    // Basic navigation methods to clean up existing page, change location and update history
+    function updateLocation(url) {
+        if (lastRenderedOrigin !== origin.History) {
+            history.pushState(url);
+        }
+        // Clear out all pending URLs now that we're starting a fresh page
+        pendingRequestUrls = [];
+    }
+    function handleHistoryChange(data) {
+        if (data && data.length > 1) {
+            var currentUrl = removeHash(data[1]);
+            // prevent re-rendering same page twice
+            if (currentUrl && currentUrl !== removeHash(lastRenderedUrl)) {
+                renderSERP(currentUrl, origin.History);
+            }
+        }
+    }
+    function handleLocationChange(url, orginValue, persistentEl) {
+        if (persistentEl) {
+            persistentNode = persistentEl;
+            url = emitPersistentNodeToUrlIfExists(url);
+        }
+        var relativeUrl = helper.getRelativeUrl(url);
+        if (relativeUrl.indexOf(allowedPath) === 0) {
+            relativeUrl = removeHash(relativeUrl);
+            renderSERP(relativeUrl, orginValue);
+        }
+        else {
+            window.location.assign(url);
+        }
+    }
+    function removeHash(url) {
+        if (!url) {
+            return url;
+        }
+        var indexOfHash = url.indexOf("#");
+        return indexOfHash === -1 ? url : url.substring(0, indexOfHash);
+    }
+    function backupStyles() {
+        if (pendingStyleBackup) {
+            var backupCssHolder = dom.getCssHolder();
+            backupCssHolder.id = "ajaxStylesBackup";
+            var cssHolder = dom.getCssHolder();
+            var backupCssHolderSibling = backupCssHolder.nextSibling;
+            if (backupCssHolderSibling) {
+                backupCssHolder.parentNode.insertBefore(cssHolder, backupCssHolderSibling);
+            }
+            pendingStyleBackup = false;
+        }
+    }
+    function cleanupStyles() {
+        var backupCssHolder = document.getElementById("ajaxStylesBackup");
+        if (backupCssHolder)
+            backupCssHolder.parentNode.removeChild(backupCssHolder);
+    }
+    // Autosuggest & Searchbox
+    function getSearchUrl(query) {
+        return allowedPath + "?q=" + encodeURIComponent(query);
+    }
+    function getFormParameters(form) {
+        var value = "";
+        var inputFields = form.getElementsByTagName("input");
+        for (var i = 0; i < inputFields.length; i++) {
+            if (inputFields[i]["type"] === "hidden") {
+                value += "&" + inputFields[i]["name"] + "=" + encodeURIComponent(inputFields[i]["value"]);
+            }
+        }
+        return value;
+    }
+    function handleSearchForm(evt) {
+        var relativeUrl = getUrlFromSearchForm();
+        if (relativeUrl) {
+            // Query is not empty and not just whitespace
+            shared.preventDefault(evt);
+            renderSERP(relativeUrl, origin.AS);
+        }
+    }
+    function getUrlFromSearchForm() {
+        var relativeUrl;
+        var form;
+        var query;
+        var serpHeader = _ge("serpHeader");
+        if (keyMap.IsHP && serpHeader) {
+            var serpSearchForm = serpHeader.getElementsByTagName("form");
+            if (serpSearchForm.length > 0 && serpSearchForm[0].id === keyMap.SearchForm) {
+                form = serpSearchForm[0];
+                var serpSearchBox = form.getElementsByClassName("b_searchbox");
+                if (serpSearchBox.length > 0 && serpSearchBox[0].id === keyMap.SBoxId) {
+                    query = serpSearchBox[0].value;
+                }
+            }
+        }
+        else {
+            form = _d.getElementById(keyMap.SearchForm);
+            query = _d.getElementById(keyMap.SBoxId)["value"];
+        }
+        if (queryRegex.test(query)) {
+            // Query is not empty and not just whitespace
+            relativeUrl = getSearchUrl(query) + getFormParameters(form);
+        }
+        return relativeUrl;
+    }
+    // Short-term solutions
+    function removeNotification() {
+        var div = document.getElementById(keyMap.Notification);
+        if (div) {
+            div.parentNode.removeChild(div);
+            var identity = document.getElementById("id_h");
+            if (identity)
+                identity.style.top = "0";
+        }
+    }
+    // First run operations
+    customEvents.bind("onP1", init, true);
+    window["AjaxCB"] = [];
+});
+;

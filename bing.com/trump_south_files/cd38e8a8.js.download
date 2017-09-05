@@ -1,0 +1,1274 @@
+/* Slide Experience */
+///<reference path="declarations\Shared.d.ts" />
+///<reference path="declarations\Touch.d.ts" />
+///<reference path="declarations\CssClass.d.ts" />
+///<reference path="Composer\WireUp.ts"/>
+///<reference path="Touch\Swipe.ts" />
+///<reference path="AjaxDataLoader.ts" />
+///<reference path="Orientation.ts" />
+///<reference path="StateUpdater.ts" />
+var SlideExperience;
+(function (SlideExperience) {
+    var fadeInSlideClassName = "slide_fading";
+    var hideMaskOnSlideClassName = "hideSlideMask";
+    var autoSlidingFadeClassName = "b_autoslidingfade";
+    var firstSlideOpaqueClassName = "firstslideopaque";
+    var enableSelectingSlideClassName = "enable_selecting";
+    var selectedSlideClassName = "selected";
+    var VisibleSlide = (function () {
+        function VisibleSlide(slideIndex, visiblePercentage) {
+            this.slideIndex = slideIndex;
+            this.visiblePercentage = visiblePercentage;
+        }
+        return VisibleSlide;
+    }());
+    SlideExperience.VisibleSlide = VisibleSlide;
+    var Sliding = (function () {
+        function Sliding(controlId, autoSlidingInterval, isCarousel, slideRightMargin, ajaxDataLoader, showChevronAllTime, enableVariedWidth, enableAutoSlidingFade, enableAutoStackableSlideCrossFading, enableHidePagerAndChevron, enableNegativeBleeding, enableCarouselSeeMore, enableHighlightSelectedSlide, shownSlideIndex, enableDefaultChevron, hideChevronsOnStart, enableDropShadow) {
+            this.slidingTimeSpan = 0.25; /* animation time span from one slide to another slide, in second */
+            this.animationInterval = 50; /* time between twohideSlideMask consecutive animation frames, in millisecond */
+            this.swipeThreshold = 50; /* if the distance swiped is less than this threshold, no left/right action is triggered */
+            this.autoSlidingInterval = 0; /* time between two automatic sliding action, in second; 0 means autosliding is disabled */
+            this.autoSlidingPausedTimeStamp = 0;
+            this.latestSwipeActionId = 0; /* to distinguish different swiping action; if another swipe is initiated, the animation belong to the previous swiping action should be stopped */
+            this.isSlideShow = true; /* which animation do we do, carousel or slideshow? */
+            this.sameViewportWidthOnOrientation = false; /* when we orientate from portrait to landscape, whether we keep the same viewport width */
+            this.shouldSnapOnOrientation = false; /* when we orientate from portrait to landscape, whether we adjust the slide offset to snap viewport */
+            this.activeSlideIndex = 0;
+            this.swipeTargetOffset = 0;
+            this.isMaskFadingAnimation = false;
+            this.ani = null; /* we have only one animation */
+            this.paddingBufferWithDropShadow = 4;
+            this.paddingBufferWithoutDropShadow = 0;
+            this.scrolling = false;
+            this.autoSlidingInterval = autoSlidingInterval;
+            this.controlId = controlId;
+            this.bar = _ge(controlId);
+            this.viewport = this.bar.parentElement;
+            if (enableNegativeBleeding) {
+                this.viewport = this.bar.parentElement.parentElement;
+            }
+            this.showChevronAllTime = showChevronAllTime;
+            this.hideChevronsOnStart = hideChevronsOnStart;
+            this.paddingBuffer = enableDropShadow ? this.paddingBufferWithDropShadow : this.paddingBufferWithoutDropShadow;
+            // If less than less than three layers up, this.control won't represent the whole control, and since this.control is registered for
+            // mouseover/mouseout events to hide/show chevrons, the chevron behavior will be weird. For example, when this.control is the viewport,
+            // mouse moving out of the viewport into the chevrons will be regarded as moving out of the control, which will hide the chevrons, which is bad.
+            this.control = _ge(this.bar.id + "c");
+            this.appns = this.control.getAttribute("data-appns");
+            this.kvalue = this.control.getAttribute("data-k");
+            this.isSlideShow = !isCarousel;
+            this.slideExpType = isCarousel ? "Carousel" : "SlideShow";
+            this.slideRightMargin = slideRightMargin;
+            this.totalSlides = this.bar.childElementCount;
+            // throw if no slides was provided by partner user, which means the spark was wrong
+            if (this.totalSlides <= 0) {
+                throw "no slides was found";
+            }
+            this.initialViewportWidth = this.viewportWidth();
+            this.ajaxDataLoader = ajaxDataLoader;
+            if (this.isSlideShow) {
+                this.sameViewportWidthOnOrientation = true;
+                /* need to snap when viewport width is 100% */
+                this.shouldSnapOnOrientation = true;
+            }
+            this.enableVariedWidth = enableVariedWidth;
+            this.enableAutoSlidingFade = enableAutoSlidingFade;
+            this.enableAutoStackableSlideCrossFading = enableAutoStackableSlideCrossFading;
+            this.enableHidePagerAndChevron = enableHidePagerAndChevron;
+            this.enableInitialOffset = shownSlideIndex > 0;
+            this.enableNegativeBleeding = enableNegativeBleeding;
+            this.extraBleedingMargin = this.viewport.scrollWidth - (this.totalSlides * (this.slideWidth() + this.slideRightMargin) - this.slideRightMargin) + Math.abs(parseInt(getComputedStyle(this.bar).marginLeft));
+            this.enableCarouselSeeMore = enableCarouselSeeMore;
+            this.enableHighlightSelectedSlide = enableHighlightSelectedSlide;
+            this.shownSlideIndex = shownSlideIndex;
+            if (this.enableInitialOffset) {
+                this.activeSlideIndex = shownSlideIndex;
+            }
+            this.stateKey = this.control.getAttribute("data-stk");
+            this.enableDefaultChevron = enableDefaultChevron;
+            this.hoverRegion = enableDefaultChevron ? this.bar : this.control;
+        }
+        Sliding.prototype.enableNativeScrolling = function () {
+            if (this.viewport.getAttribute("nativeScrollingEnabled") === "1")
+                return;
+            // FIXME: TFS#5183436, should move to css
+            this.viewport.parentElement.style.overflow = "hidden";
+            var height = this.viewport.offsetHeight;
+            if (height === 0) {
+                if (!this.isSlideShow) {
+                    // enable scroll bar, which might increase the viewport height due to horizontal scrollbar
+                    Lib.CssClass.add(this.viewport, "scrollbar");
+                }
+                this.viewport.parentElement.style.position = "relative";
+                var topViewport = this.bar.parentElement;
+                if (this.enableNegativeBleeding) {
+                    topViewport = this.bar.parentElement.parentElement;
+                }
+                var bottomPhantomViewport = (topViewport.cloneNode(true));
+                bottomPhantomViewport.style.opacity = "0";
+                bottomPhantomViewport.style.overflow = "hidden";
+                topViewport.style.position = "absolute";
+                topViewport.style.width = "100%";
+                // because the chrove must be in the top of carousel, cannot use z-index to cover the bottomPhantomViewport
+                topViewport.style.top = "0";
+                //FireFox cannot support insertAdjacentElement
+                topViewport.parentElement.insertBefore(bottomPhantomViewport, topViewport.parentElement.children[0]);
+                // expand the screll bar, so that the bottomPhantomViewport can keep the hight to hide this scoll bar. 
+                this.bar.style.paddingBottom = "10px";
+            }
+            else {
+                // Limit the height for either ajax call or hiding scroll bar
+                // If the ajax call returns larger height, it may break the current serp. By limiting the viewport, we prevent such case from happening
+                this.viewport.parentElement.style.height = "" + this.viewportHeightToParentHeight(height) + "px";
+                this.bar.style.height = "" + this.viewportHeightToBarHeight(height) + "px";
+                if (!this.isSlideShow) {
+                    // enable scroll bar, which might increase the viewport height due to horizontal scrollbar
+                    Lib.CssClass.add(this.viewport, "scrollbar");
+                    // Hide the scroll bar if the scroll bar is asking for more space
+                    //
+                    // Note: there is a buug in iPhone6 that, when the parent is overflow hidden, _and_ the parent is shorter than child, \
+                    //       _and_ when scrolling the parent to the rightmost, the child is not rendered (blank, see no content). 
+                    //
+                    //       The workaround is, test if the height with scroll bar is larger than the height without scroll bar, if yes, it is desktop \
+                    //       on which we have to hide the scroll bar for its ugliness. If not, it is likely mobile on which the scroll bar is narrow and is \
+                    //       inside the element, which is not necessary to be hidden, although, it is better to offset the scroll bar a little bit so that \
+                    //       the content won't overlap the scroll bar.
+                    var viewportHeight = this.viewport.offsetHeight;
+                    this.viewport.style.height = "" + viewportHeight + "px";
+                    this.viewport.style.marginBottom = "-30px";
+                    this.viewport.style.paddingBottom = "30px";
+                    if (this.enableCarouselSeeMore) {
+                        var seeMoreNode = _ge(this.controlId + "_carousel_seemore");
+                        //Keep the height of see more slide same as the tallest slide
+                        seeMoreNode.style.height = "" + height + "px";
+                        //Use line-height to implement vertical center
+                        seeMoreNode.style.lineHeight = "" + height + "px";
+                    }
+                }
+            }
+            this.viewport.setAttribute("nativeScrollingEnabled", "1");
+        };
+        Sliding.prototype.init = function () {
+            var _this = this;
+            if (this.enableHighlightSelectedSlide) {
+                Lib.CssClass.add(this.bar, enableSelectingSlideClassName);
+            }
+            if (this.enableInitialOffset) {
+                this.consumeInitialOffset();
+            }
+            if (!this.enableAutoStackableSlideCrossFading) {
+                this.enableNativeScrolling();
+            }
+            if (this.enableVariedWidth) {
+                this.hideOverlayInSlide();
+            }
+            if (this.enableAutoSlidingFade || this.enableAutoStackableSlideCrossFading) {
+                this.enablefirstSlideFade();
+            }
+            sj_be(this.viewport, "scroll", function (evt) {
+                _this.onScroll();
+            });
+            if (!this.enableHidePagerAndChevron) {
+                Swipe.OnSwipe(function (speed) {
+                    if (_this.isSlideShow) {
+                        var target;
+                        if (_this.enableVariedWidth) {
+                            target = _this.activeSlideIndex - 1;
+                            _this.updateScrollingVariedWidth(speed, ++_this.latestSwipeActionId, target);
+                        }
+                        else {
+                            target = _this.getActiveSlide() - 1;
+                            _this.updateScrollingEqualWidth(speed, ++_this.latestSwipeActionId, target);
+                        }
+                        _w["WireUp"] && WireUp.setValue(_this.control, "selected", target);
+                        _w["WireUp"] && WireUp.setValue(_this.control, "active", target);
+                        _this.updateState(target);
+                    }
+                    Log.Log("Left", "SlideExp", "Swipe", false, "Type", _this.slideExpType, "AppNS", _this.appns, "K", _this.kvalue);
+                }, function (speed) {
+                    if (_this.isSlideShow) {
+                        var target;
+                        if (_this.enableVariedWidth) {
+                            target = _this.activeSlideIndex + 1;
+                            _this.updateScrollingVariedWidth(speed, ++_this.latestSwipeActionId, target);
+                        }
+                        else {
+                            target = _this.getActiveSlide() + 1;
+                            _this.updateScrollingEqualWidth(speed, ++_this.latestSwipeActionId, target);
+                        }
+                        _w["WireUp"] && WireUp.setValue(_this.control, "selected", target);
+                        _w["WireUp"] && WireUp.setValue(_this.control, "active", target);
+                        _this.updateState(target);
+                    }
+                    Log.Log("Right", "SlideExp", "Swipe", false, "Type", _this.slideExpType, "AppNS", _this.appns, "K", _this.kvalue);
+                }, this.control, this.swipeThreshold, function (x, y) {
+                    if (_this.isSlideShow) {
+                        _this.viewport.scrollLeft -= x;
+                        _this.latestSwipeActionId = 0;
+                        _this.disableAutoSliding();
+                        _this.disableAutoSlidingAnimation();
+                    }
+                }, function (speed) {
+                    _this.isLeft = speed > 0;
+                    _this.isRight = speed < 0;
+                    if (_this.isSlideShow) {
+                        if (_this.enableVariedWidth) {
+                            _this.updateScrollingVariedWidth(speed, ++_this.latestSwipeActionId, _this.activeSlideIndex);
+                        }
+                        else {
+                            _this.updateScrollingEqualWidth(speed, ++_this.latestSwipeActionId, _this.getActiveSlide());
+                        }
+                    }
+                    Log.Log("NoOp", "SlideExp", "Swipe", false, "Type", _this.slideExpType, "AppNS", _this.appns, "K", _this.kvalue);
+                }, function () { }, true, this.isSlideShow ? true : false);
+            }
+            // In carousel, we support mouse dragging
+            if (!this.isSlideShow) {
+                var lastClickPageX;
+                var lastClickPageY;
+                sj_be(this.control, "mousedown", function (evt) {
+                    lastClickPageX = evt.pageX;
+                    lastClickPageY = evt.pageY;
+                    // prevent dragging image within slide
+                    if (evt.preventDefault)
+                        evt.preventDefault();
+                    var lastPageX = evt.pageX;
+                    var moveHandler = function (evtMove) {
+                        var deltaX = evtMove.pageX - lastPageX;
+                        _this.viewport.scrollLeft -= deltaX;
+                        lastPageX = evtMove.pageX;
+                    };
+                    var endHandler = function (evt) {
+                        // clean up event handlers, or, perf will be hurt because all the mouse events will be handled here
+                        sj_ue(_w, "mousemove", moveHandler, true);
+                        sj_ue(_w, "mouseup", endHandler, true);
+                    };
+                    // handle all the mouse events including the elements outside of this control, so that dragging outside of this control is still valid
+                    sj_be(_w, "mousemove", moveHandler, true);
+                    sj_be(_w, "mouseup", endHandler, true);
+                }, true);
+                // don't trigger click if apparently in dragging mode
+                var clickHandler = function (evt) {
+                    if (Math.abs(evt.pageX - lastClickPageX) > 5 || Math.abs(evt.pageY - lastClickPageY) > 5) {
+                        if (evt.preventDefault)
+                            evt.preventDefault(); // don't trigger click if in dragging
+                    }
+                };
+                sj_be(this.control, "click", clickHandler, true);
+            }
+            // the boundary that we can scroll to the right most
+            this.updateMaxScrollLeft();
+            // support rotation on mobile
+            Orientation.onOrientation(function (isLandscape) {
+                if (_this.enableVariedWidth) {
+                    var firstSlide = _this.bar.children[0];
+                    var newMarginLeft = (_w.innerWidth - _this.getElementWidth(firstSlide)) / 2;
+                    firstSlide.style.marginLeft = "" + newMarginLeft + "px";
+                    var lastSlide = _this.bar.children[_this.bar.childElementCount - 1];
+                    var newMarginRight = (_w.innerWidth - _this.getElementWidth(firstSlide)) / 2;
+                    lastSlide.style.marginRight = "" + newMarginRight + "px";
+                    _this.viewport.scrollLeft = _this.calculateScrollLeft(_this.activeSlideIndex);
+                }
+                // only slideshow keeps the same width of viewport for both portrait and landscape modes
+                if (_this.sameViewportWidthOnOrientation && !_this.enableVariedWidth) {
+                    _this.viewport.style.width = isLandscape ? "" + _this.initialViewportWidth + "px" : "";
+                }
+                // snap the slides when animation is not ongoing
+                if (_this.shouldSnapOnOrientation && !_this.isSlidingAnimation() && !_this.enableVariedWidth) {
+                    _this.viewport.scrollLeft = _this.getActiveSlide() * _this.slideWidth();
+                }
+                _this.updateMaxScrollLeft(); // when the viewport width updates, the max scrollLeft should be updated
+                var control = _ge(_this.controlId);
+                if (control) {
+                    Log.Log(isLandscape ? "Landsc" : "Portrt", "SlideExp", "Rotate", false, "Type", _this.slideExpType, "AppNS", _this.appns, "K", _this.kvalue);
+                }
+                else {
+                    Log.Log(isLandscape ? "Landsc" : "Portrt", "SlideExp", "Rotate", false, "Type", _this.slideExpType, "GeE", "1", "AppNS", _this.appns, "K", _this.kvalue);
+                }
+                // This is a HACK to unblock Ads team. Tracked in #594541
+                // On some browsers in some devices, in orientation event handler, _ge(id) returns null even the DOM element exists. We are investigating, but
+                // to unblock Ads PA Carousel feature, we'll pass in an extra DOM representing this.controlId, as the third parameter, when _ge(id) fails.
+                // Data:
+                // In an error sample of 1817 impressions (see https://cosmos09.osdinfra.net/cosmos/searchSTC-a/users/incaldas/monetization/MVEvents3.ss?property=info),
+                // there are 485 errors caused by UA: Mozilla/5.0 (iPhone; CPU iPhone OS 10_1_1 like Mac OS X) AppleWebKit/602.2.14 (KHTML, like Gecko) Version/10.0 Mobile/14B100 Safari/602.1
+                // there are 191 errors caused by UA: Mozilla/5.0 (iPhone; CPU iPhone OS 10_0_2 like Mac OS X) AppleWebKit/602.1.50 (KHTML, like Gecko) Version/10.0 Mobile/14A456 Safari/602.1
+                // there are 70 errors caused by UA: Mozilla/5.0 (iPhone; CPU iPhone OS 9_3_5 like Mac OS X) AppleWebKit/601.1.46 (KHTML, like Gecko) Version/9.0 Mobile/13G36 Safari/601.1
+                // there are 25 errors caused by UA: Mozilla/5.0 (iPhone; CPU iPhone OS 10_0_1 like Mac OS X) AppleWebKit/602.1.50 (KHTML, like Gecko) Version/10.0 Mobile/14A403 Safari/602.1
+                // other errors are long tail, from all kinds of devices, e.g. Chrome on Android, Firefox on Android
+                // However, we can't repro it on our real iPhone6/Android devices.
+                sj_evt.fire("slideexp_rotate", _this.controlId, control ? null : _this.bar);
+            });
+            // auto sliding
+            if (!this.isAutoSlidingDisabled()) {
+                sb_st(function () {
+                    _this.autoSlide(0);
+                }, this.autoSlidingInterval * 1000);
+                if (!this.enableHidePagerAndChevron) {
+                    sj_be(this.control, "mouseover", function (evt) {
+                        _this.pauseAutoSliding();
+                        _this.autoSlidingPausedTimeStamp = new Date().getTime();
+                    });
+                    sj_be(this.control, "mouseout", function (evt) {
+                        var mouseoutTimeStamp = new Date().getTime();
+                        if ((mouseoutTimeStamp - _this.autoSlidingPausedTimeStamp) > 5000) {
+                            _this.disableAutoSliding();
+                            _this.disableAutoSlidingAnimation();
+                        }
+                        else {
+                            _this.resumeAutoSliding();
+                        }
+                    });
+                }
+            }
+            // bind events
+            sj_be(this.hoverRegion, "mouseover", function (evt) {
+                _this.enableChevronsOnSlideExperienceInvisibility();
+                if (_this.enableDefaultChevron) {
+                    sj_evt.fire("slideexp_mouseover_dark", _this.controlId);
+                }
+                sj_evt.fire("slideexp_mouseover_show", _this.controlId);
+            });
+            sj_be(this.hoverRegion, "mouseout", function (evt) {
+                if (_this.enableDefaultChevron) {
+                    sj_evt.fire("slideexp_mouseout_light", _this.controlId);
+                }
+                else {
+                    if (!_this.showChevronAllTime) {
+                        sj_evt.fire("slideexp_mouseout_hide", _this.controlId);
+                    }
+                }
+            });
+            if (!this.enableHidePagerAndChevron) {
+                sj_be(this.control, "click", function (evt) {
+                    _this.disableAutoSliding();
+                    _this.disableAutoSlidingAnimation();
+                });
+            }
+            sj_evt.bind("slideexp_slideprev", function (args) {
+                if (!_this.isEventForMe(args)) {
+                    return;
+                }
+                _this.disableAutoSliding();
+                _this.disableAutoSlidingAnimation();
+                _this.slidePrev();
+            });
+            sj_evt.bind("slideexp_slidenext", function (args) {
+                if (!_this.isEventForMe(args)) {
+                    return;
+                }
+                _this.disableAutoSliding();
+                _this.disableAutoSlidingAnimation();
+                _this.slideNext();
+            });
+            sj_evt.bind("slideexp_slidetoindex", function (args) {
+                if (!_this.isEventForMe(args)) {
+                    return;
+                }
+                var index = args[2];
+                _this.disableAutoSliding();
+                _this.disableAutoSlidingAnimation();
+                if (_this.isSlideShow) {
+                    if (_this.activeSlideIndex !== index) {
+                        _this.slideToIndex(index);
+                    }
+                }
+                else {
+                    _this.slideToIndexWithMinOffset(index);
+                }
+                Log.Log("SlideTo", "SlideExp", "ID" + index, false, "Type", _this.slideExpType, "AppNS", _this.appns, "K", _this.kvalue);
+            }, true);
+            sj_evt.bind("slideexp_pauseautoslide", function (args) {
+                if (!_this.isEventForMe(args)) {
+                    return;
+                }
+                _this.pauseAutoSliding();
+            });
+            sj_evt.bind("slideexp_resumeautoslide", function (args) {
+                if (!_this.isEventForMe(args)) {
+                    return;
+                }
+                _this.resumeAutoSliding();
+            });
+            if (!this.isSlideShow && this.enableHighlightSelectedSlide) {
+                for (var index = 0; index < this.bar.children.length; ++index) {
+                    sj_be(this.bar.children[index], "click", (function (index) {
+                        return function (evt) {
+                            for (var i = 0; i < _this.bar.children.length; i++) {
+                                var slide = _this.bar.children[i];
+                                Lib.CssClass.remove(slide, selectedSlideClassName);
+                            }
+                            Lib.CssClass.add(_this.bar.children[index], selectedSlideClassName);
+                            //fire same event with slide moving for carousel
+                            _this.slideToIndexWithMinOffset(index);
+                            Log.Log("HighLight", "SlideExp", "Click", false, "Type", _this.slideExpType, "AppNS", _this.appns, "K", _this.kvalue);
+                        };
+                    })(index));
+                }
+            }
+            for (var index = 0; index < this.bar.children.length; ++index) {
+                sj_be(this.bar.children[index], "click", (function (index) {
+                    return function (evt) {
+                        //fire event for slideshow / carousel the clicked slide index
+                        _w["WireUp"] && WireUp.setValue(_this.control, "selected", index);
+                        if (!_this.isSlideShow) {
+                            _w["WireUp"] && WireUp.setValue(_this.control, "active", index);
+                        }
+                        Log.Log("ClickOnSlide", "SlideExp", "Click", false, "Type", _this.slideExpType, "AppNS", _this.appns, "K", _this.kvalue);
+                    };
+                })(index));
+            }
+            for (var i = 0; i < this.bar.childElementCount; ++i) {
+                sj_be(this.bar.children[i], "keydown", (function (i) {
+                    return function (evt) {
+                        if (evt.keyCode === 37 /* ArrowLeft */ && i !== 0) {
+                            _this.slideToIndex(i - 1, true);
+                        }
+                        else if (evt.keyCode === 39 /* ArrowRight */ && i !== _this.bar.childElementCount - 1) {
+                            _this.slideToIndex(i + 1, true);
+                        }
+                    };
+                })(i));
+            }
+            for (var i = 0; i < this.bar.childElementCount; ++i) {
+                sj_be(this.bar.children[i], "focus", function (evt) {
+                    _this.disableAutoSliding();
+                    _this.disableAutoSlidingAnimation();
+                });
+            }
+            // determine if showing leftmost chevron and simulate mosueover event to enable showing chevron
+            if (this.showChevronAllTime && !this.hideChevronsOnStart) {
+                this.updateChevrons();
+                sj_evt.fire("slideexp_mouseover_show", this.controlId);
+            }
+            // update chevron, pager, and load ajax content on initial
+            this.updatePager();
+            this.updateChevrons();
+            this.updateAjax();
+            // find the minimum auto refresh interval among all the slides
+            var minAutoRefreshInterval = 600000; // maximum refresh interval is 10 minutes
+            for (var i = 0; i < this.totalSlides; ++i) {
+                minAutoRefreshInterval = Math.min(minAutoRefreshInterval, this.ajaxDataLoader.autoReloadingInterval(this.getSlide(i)));
+            }
+            minAutoRefreshInterval = Math.max(minAutoRefreshInterval, 10000); // we should refresh no less than 10 seconds, or the cpu load would be very high
+            // auto refresh ajax content
+            var sliding = this;
+            sb_si(function () { sliding.updateAjax.apply(sliding); }, minAutoRefreshInterval);
+            sj_evt.fire("slideexp_init_done", this.controlId);
+        };
+        Sliding.prototype.onScroll = function () {
+            var _this = this;
+            if (this.scrolling)
+                return;
+            this.scrolling = true;
+            // reduce scroll frequency by dropping scrolling events for a period
+            sb_st(function () {
+                _this.updatePager();
+                _this.updateChevrons();
+                _this.updateAjax();
+                sj_evt.fire("slideexp_scroll", _this.controlId);
+                Log.Log("Scroll", "SlideExp", "Scroll", false, "Type", _this.slideExpType, "AppNS", _this.appns, "K", _this.kvalue);
+                _this.scrolling = false;
+            }, 1000);
+        };
+        Sliding.prototype.disableAutoSliding = function () {
+            this.autoSlidingInterval = 0;
+        };
+        Sliding.prototype.disableAutoSlidingAnimation = function () {
+            if (!this.enableAutoStackableSlideCrossFading) {
+                Lib.CssClass.remove(this.bar, autoSlidingFadeClassName);
+                for (var i = 0; i < this.bar.childElementCount; i++) {
+                    var slide = this.bar.children[i];
+                    Lib.CssClass.remove(slide, fadeInSlideClassName);
+                }
+            }
+            this.enableAutoSlidingFade = false;
+        };
+        Sliding.prototype.isAutoSlidingDisabled = function () {
+            return this.autoSlidingInterval === 0;
+        };
+        Sliding.prototype.isAutoSlidingPaused = function () {
+            return this.autoSlidingInterval < 0;
+        };
+        Sliding.prototype.pauseAutoSliding = function () {
+            if (this.isAutoSlidingPaused() || this.isAutoSlidingDisabled() || (this.enableAutoStackableSlideCrossFading && this.enableHidePagerAndChevron)) {
+                return;
+            }
+            this.autoSlidingInterval = -this.autoSlidingInterval;
+        };
+        Sliding.prototype.resumeAutoSliding = function () {
+            if (this.isAutoSlidingDisabled() || !this.isAutoSlidingPaused() || (this.enableAutoStackableSlideCrossFading && this.enableHidePagerAndChevron)) {
+                return;
+            }
+            this.autoSlidingInterval = -this.autoSlidingInterval;
+        };
+        Sliding.prototype.getVisibleSlidesIndices = function () {
+            var slidesIndices = [];
+            for (var i = 0; i < this.totalSlides; i++) {
+                if (this.isSlideVisible(i)) {
+                    slidesIndices.push(i);
+                }
+            }
+            return slidesIndices;
+        };
+        // slideindex start from 1
+        Sliding.prototype.getVisiblePercentage = function (slideIndex) {
+            var visiblePercentage = 0;
+            var visibleSlidesIndices = this.getVisibleSlidesIndices();
+            if (visibleSlidesIndices.indexOf(slideIndex) > -1) {
+                var partialVisibleSlideWidth;
+                var slidedSlideWidth = (slideIndex === this.totalSlides) ? (slideIndex * (this.slideWidth() + this.slideRightMargin) - this.slideRightMargin) : (slideIndex * (this.slideWidth() + this.slideRightMargin));
+                if (visibleSlidesIndices.indexOf(slideIndex) === 0) {
+                    var partialInVisibleSlideWidth = (this.viewport.scrollLeft - this.extraBleedingMargin) - slidedSlideWidth;
+                    partialVisibleSlideWidth = partialInVisibleSlideWidth < 0 ? this.slideWidth() : this.slideWidth() - partialInVisibleSlideWidth;
+                    visiblePercentage = partialVisibleSlideWidth / this.slideWidth();
+                }
+                else if (visibleSlidesIndices.indexOf(slideIndex) === visibleSlidesIndices.length - 1) {
+                    partialVisibleSlideWidth = ((this.viewport.scrollLeft - this.extraBleedingMargin) + this.viewportWidth()) - slidedSlideWidth;
+                    visiblePercentage = partialVisibleSlideWidth / this.slideWidth();
+                }
+                else {
+                    visiblePercentage = 1;
+                }
+            }
+            return visiblePercentage;
+        };
+        Sliding.prototype.viewportHeightToParentHeight = function (viewportHeight) {
+            return viewportHeight + 4 * this.paddingBuffer;
+        };
+        Sliding.prototype.viewportHeightToBarHeight = function (viewportHeight) {
+            return viewportHeight + this.paddingBuffer;
+        };
+        Sliding.prototype.hideOverlayInSlide = function () {
+            var shownSlideElementChild = this.bar.children[this.shownSlideIndex > 0 ? this.shownSlideIndex : 0];
+            var elementChildOverlay = shownSlideElementChild.children[shownSlideElementChild.childElementCount - 1];
+            Lib.CssClass.add(elementChildOverlay, hideMaskOnSlideClassName);
+        };
+        Sliding.prototype.enablefirstSlideFade = function () {
+            var firstElementChild = this.bar.children[0];
+            Lib.CssClass.add(firstElementChild, fadeInSlideClassName);
+        };
+        Sliding.prototype.enableChevronsOnSlideExperienceInvisibility = function () {
+            this.updateMaxScrollLeft();
+            this.updateChevrons();
+        };
+        Sliding.prototype.getElementWidth = function (element) {
+            if (_w.getComputedStyle) {
+                var width = _w.getComputedStyle(element).width;
+                return Number(width.substring(0, width.length - 2)); // remove the "px" in width, e.g. "120px"
+            }
+            // old browsers don't have getComputedStyle, just fall back to scrollWidth
+            return element.scrollWidth;
+        };
+        Sliding.prototype.updateMaxScrollLeft = function () {
+            if (this.enableVariedWidth) {
+                var firstSlide = this.bar.children[0];
+                var lastSlide = this.bar.children[this.bar.childElementCount - 1];
+                var firstBlank = Math.abs(this.viewport.offsetWidth - this.getElementWidth(firstSlide)) / 2;
+                var lastBlank = Math.abs(this.viewport.offsetWidth - this.getElementWidth(lastSlide)) / 2;
+                this.maxScrollLeft = (firstBlank + this.viewport.scrollWidth + lastBlank) - this.viewport.offsetWidth;
+            }
+            else {
+                this.maxScrollLeft = this.viewport.scrollWidth - this.viewport.offsetWidth;
+            }
+        };
+        // for old browser (e.g. IE8) that doesn't support firstElementChild
+        Sliding.prototype.firstElementChild = function (element) {
+            if (element.firstElementChild) {
+                return element.firstElementChild;
+            }
+            var child = element.firstChild;
+            while (child) {
+                if (child.nodeType == 1 /* Node.ELEMENT_NODE */) {
+                    return child;
+                }
+                child = child.nextSibling;
+            }
+            return null;
+        };
+        Sliding.prototype.slideWidth = function () {
+            if (this.isSlideShow) {
+                if (this.enableVariedWidth) {
+                    return this.slideRightMargin + this.getElementWidth(this.getSlide(this.activeSlideIndex));
+                }
+                else {
+                    return this.slideRightMargin + this.getElementWidth(this.firstElementChild(this.bar));
+                }
+            }
+            return this.getElementWidth(this.firstElementChild(this.bar)); /* When we rotate to landscape mode, we need to update the slide width */
+        };
+        Sliding.prototype.viewportWidth = function () {
+            return this.getElementWidth(this.viewport);
+        };
+        Sliding.prototype.isCssTransitionSupported = function () {
+            var viewportStyle = this.viewport.style;
+            var isWebkitTransitionSupported = viewportStyle.WebkitTransition != null;
+            var isMozTransitionSupported = viewportStyle.MozTransition != null;
+            var isOperaTransitionSupported = viewportStyle.OTransition != null;
+            var isCssTransitionSupported = isWebkitTransitionSupported || isMozTransitionSupported || isOperaTransitionSupported || viewportStyle.transition != null;
+            return isCssTransitionSupported;
+        };
+        Sliding.prototype.getActiveSlide = function () {
+            var activeCardIndex = Math.round(this.viewport.scrollLeft / this.slideWidth());
+            return activeCardIndex;
+        };
+        Sliding.prototype.getSlide = function (index) {
+            return (this.bar.children[index]);
+        };
+        Sliding.prototype.updateAjax = function () {
+            var activeCardIndex = this.enableVariedWidth ? this.activeSlideIndex : this.getActiveSlide();
+            var actualSlideWidth = this.slideWidth() + this.slideRightMargin;
+            var slidesVisible = Math.ceil(this.viewportWidth() / actualSlideWidth);
+            if (this.isSlideShow)
+                slidesVisible++; // prefetch earlier, esp. for auto sliding
+            for (var i = Math.max(0, activeCardIndex - slidesVisible); i < Math.min(this.totalSlides, activeCardIndex + slidesVisible); ++i) {
+                this.ajaxDataLoader.loadAjaxData(this.getSlide(i));
+            }
+        };
+        Sliding.prototype.updatePager = function (index) {
+            if (!index) {
+                index = this.activeSlideIndex;
+            }
+            sj_evt.fire("pager_updateindex", this.controlId, index);
+        };
+        Sliding.prototype.updateScrollingEqualWidth = function (speed, swipeActionId, target) {
+            var _this = this;
+            // When another swiping occur during the animation of the current animation, stop the current animation
+            if (swipeActionId !== this.latestSwipeActionId) {
+                return;
+            }
+            var nextScrollLeft = this.viewport.scrollLeft - speed * this.animationInterval;
+            var activeCardIndex = Math.floor(this.viewport.scrollLeft / this.slideWidth());
+            var nextActiveCardIndex = Math.floor(nextScrollLeft / this.slideWidth());
+            var isSnapped = (this.viewport.scrollLeft % this.slideWidth()) === 0;
+            if (this.isLeftMost() || this.isRightMost()) {
+                this.updatePager();
+                this.updateAjax();
+                return;
+            }
+            var acceleration = 0;
+            if (this.isSlideShow) {
+                if (isSnapped) {
+                    // trigger slide shown event
+                    this.updatePager();
+                    this.updateAjax();
+                    return;
+                }
+                if (activeCardIndex !== nextActiveCardIndex) {
+                    if (speed < 0) {
+                        this.viewport.scrollLeft = nextActiveCardIndex * this.slideWidth();
+                        this.activeSlideIndex = nextActiveCardIndex;
+                    }
+                    else {
+                        this.viewport.scrollLeft = activeCardIndex * this.slideWidth();
+                        this.activeSlideIndex = activeCardIndex;
+                    }
+                    this.updatePager();
+                    this.updateAjax();
+                    return;
+                }
+                this.viewport.scrollLeft = nextScrollLeft;
+                target = Math.max(0, Math.min(this.totalSlides - 1, target));
+                var distance = target * this.slideWidth() - this.viewport.scrollLeft;
+                acceleration = distance * -0.005;
+                acceleration = acceleration > 0 ? Math.min(1, acceleration) : Math.max(-1, acceleration);
+                sb_st(function () { _this.updateScrollingEqualWidth(speed + acceleration, swipeActionId, target); }, this.animationInterval);
+                return;
+            }
+        };
+        Sliding.prototype.calculateScrollLeft = function (slideIndex) {
+            var TargetOffset = 0;
+            slideIndex = slideIndex === this.totalSlides ? this.totalSlides - 1 : slideIndex;
+            for (var i = slideIndex; i > 0; i--) {
+                var preSlideWidth = this.getElementWidth(this.bar.children[i - 1]) + this.slideRightMargin;
+                var preExtraSpace = (this.viewport.offsetWidth - this.getElementWidth(this.bar.children[i - 1])) / 2;
+                var extraSpace = (this.viewport.offsetWidth - this.getElementWidth(this.bar.children[i])) / 2;
+                TargetOffset += (preSlideWidth - extraSpace + preExtraSpace);
+            }
+            return TargetOffset;
+        };
+        Sliding.prototype.updateScrollingVariedWidth = function (speed, swipeActionId, target) {
+            var _this = this;
+            var moveRight = target > this.activeSlideIndex;
+            var moveLeft = target < this.activeSlideIndex;
+            var isNoop = target === this.activeSlideIndex;
+            // When another swiping occur during the animation of the current animation, stop the current animation
+            if (swipeActionId != this.latestSwipeActionId) {
+                return;
+            }
+            var nextScrollLeft = this.viewport.scrollLeft - speed * this.animationInterval;
+            var isSnapped = (this.viewport.scrollLeft % this.calculateScrollLeft(target)) === 0;
+            var acceleration = 0;
+            //check
+            if (this.isSlideShow) {
+                if (isSnapped) {
+                    // trigger slide shown event
+                    this.updatePager();
+                    this.updateAjax();
+                    return;
+                }
+                if (moveRight) {
+                    if (nextScrollLeft >= this.calculateScrollLeft(target)) {
+                        if (this.activeSlideIndex > (this.bar.childElementCount - 2))
+                            return;
+                        this.viewport.scrollLeft = this.calculateScrollLeft(target);
+                        this.activeSlideIndex++;
+                        var preSlide = this.bar.children[this.activeSlideIndex - 1];
+                        var preSlideOverlay = preSlide.children[preSlide.childElementCount - 1];
+                        this.fadingOnOverlay(preSlideOverlay);
+                        this.updatePager();
+                        this.updateAjax();
+                        return;
+                    }
+                }
+                if (moveLeft) {
+                    if (nextScrollLeft <= this.calculateScrollLeft(target)) {
+                        if (this.activeSlideIndex < 1)
+                            return;
+                        this.viewport.scrollLeft = this.calculateScrollLeft(target);
+                        this.activeSlideIndex--;
+                        var nextSlide = this.bar.children[this.activeSlideIndex + 1];
+                        var nextSlideOverlay = nextSlide.children[nextSlide.childElementCount - 1];
+                        this.fadingOnOverlay(nextSlideOverlay);
+                        this.updatePager();
+                        this.updateAjax();
+                        return;
+                    }
+                }
+                if (isNoop) {
+                    if (this.isRight && nextScrollLeft <= this.calculateScrollLeft(target)) {
+                        this.viewport.scrollLeft = this.calculateScrollLeft(target);
+                        return;
+                    }
+                    if (this.isLeft && nextScrollLeft >= this.calculateScrollLeft(target)) {
+                        this.viewport.scrollLeft = this.calculateScrollLeft(target);
+                        return;
+                    }
+                }
+                this.viewport.scrollLeft = nextScrollLeft;
+                target = Math.max(0, Math.min(this.totalSlides - 1, target));
+                var distance = this.calculateScrollLeft(target) - this.viewport.scrollLeft;
+                acceleration = distance * -0.005;
+                acceleration = acceleration > 0 ? Math.min(1, acceleration) : Math.max(-1, acceleration);
+                sb_st(function () { _this.updateScrollingVariedWidth(speed + acceleration, swipeActionId, target); }, this.animationInterval);
+                return;
+            }
+        };
+        Sliding.prototype.totalWidthOfSlidesWithinViewport = function () {
+            var actualSlideWidth = this.slideWidth() + this.slideRightMargin;
+            return Math.floor(this.viewportWidth() / actualSlideWidth) * actualSlideWidth;
+        };
+        Sliding.prototype.setSlideTabFocus = function () {
+            for (var i = 0; i < this.bar.childElementCount; i++) {
+                var slideNode = this.bar.children[i];
+                slideNode.removeAttribute("tabindex");
+            }
+            var activeSlide = this.bar.children[this.activeSlideIndex];
+            activeSlide.tabIndex = 0;
+        };
+        Sliding.prototype.consumeInitialOffset = function () {
+            if (this.enableVariedWidth) {
+                var firstSlide = this.bar.children[0];
+                var firstSlideActualLeftMargin = ((this.viewportWidth() - this.getElementWidth(firstSlide)) / 2);
+                firstSlide.style.marginLeft = firstSlideActualLeftMargin + "px";
+                this.viewport.scrollLeft = this.calculateScrollLeft(this.activeSlideIndex);
+            }
+            else {
+                var slideBarMarginLeft = getComputedStyle(this.bar).marginLeft;
+                this.bar.style.marginLeft = "";
+                this.viewport.scrollLeft = Math.abs(parseInt(slideBarMarginLeft));
+            }
+            this.enableInitialOffset = false;
+            if (this.isSlideShow) {
+                this.activeSlideIndex = this.shownSlideIndex;
+            }
+        };
+        Sliding.prototype.slidePrev = function () {
+            if (this.isSlidingAnimation()) {
+                return;
+            }
+            var target; // target scrollLeft for viewport
+            var targetSlideShow;
+            // active on prev slide
+            if (this.isSlideShow) {
+                if (this.enableAutoStackableSlideCrossFading && this.activeSlideIndex > 0) {
+                    this.fadingOnSlide(this.bar.children[this.activeSlideIndex - 1]);
+                }
+                else if (this.enableVariedWidth) {
+                    if (this.isMaskFadingAnimation) {
+                        return;
+                    }
+                    this.isMaskFadingAnimation = true;
+                    if (this.activeSlideIndex < 1) {
+                        this.isMaskFadingAnimation = false;
+                        return;
+                    }
+                    targetSlideShow = this.calculateScrollLeft(this.activeSlideIndex - 1);
+                }
+                else {
+                    if (this.isLeftMost())
+                        return;
+                    targetSlideShow = this.viewport.scrollLeft - this.slideWidth();
+                    targetSlideShow = Math.max(targetSlideShow, 0);
+                }
+                this.activeSlideIndex--;
+                _w["WireUp"] && WireUp.setValue(this.control, "active", this.activeSlideIndex);
+            }
+            else {
+                if (this.isLeftMost()) {
+                    return;
+                }
+                var actualSlideWidth = this.slideWidth() + this.slideRightMargin;
+                var fullyShownSlides = Math.floor(this.viewportWidth() / actualSlideWidth);
+                var firstSlideFullyShown = Math.ceil(this.viewport.scrollLeft / actualSlideWidth);
+                var slideToAlign = Math.max(0, firstSlideFullyShown - fullyShownSlides);
+                target = slideToAlign * actualSlideWidth;
+                target = Math.max(target, 0);
+            }
+            // active on next slide
+            if (this.isSlideShow && this.enableAutoStackableSlideCrossFading) {
+                this.updatePager();
+                this.updateChevrons();
+            }
+            else {
+                this.slideToOffset(this.isSlideShow ? targetSlideShow : target);
+                if (this.isSlideShow && this.enableVariedWidth) {
+                    var nextSlide = this.bar.children[this.activeSlideIndex + 1];
+                    var nextSlideOverlay = nextSlide.children[nextSlide.childElementCount - 1];
+                    this.fadingOnOverlay(nextSlideOverlay);
+                }
+            }
+            sj_evt.fire("slideexp_slideprev_move", this.controlId);
+            Log.Log("Prev", "SlideExp", "Slide", false, "Type", this.slideExpType, "AppNS", this.appns, "K", this.kvalue);
+            this.updateState(this.activeSlideIndex);
+        };
+        Sliding.prototype.fadingOnOverlay = function (hiddenSlideOverlay) {
+            var _this = this;
+            if (this.enableVariedWidth && this.shownSlideIndex > 0) {
+                var hideMaskSlide = this.bar.children[this.shownSlideIndex];
+                var mask = hideMaskSlide.children[hideMaskSlide.childElementCount - 1];
+                mask.style.opacity = "";
+            }
+            var firstSlide = this.bar.children[0];
+            var firstSlideOverlay = firstSlide.children[firstSlide.childElementCount - 1];
+            var currentSlide = this.bar.children[this.activeSlideIndex];
+            var currentSlideOverlay = currentSlide.children[currentSlide.childElementCount - 1];
+            Lib.CssClass.remove(hiddenSlideOverlay, hideMaskOnSlideClassName);
+            if (this.activeSlideIndex === 0) {
+                firstSlideOverlay.style.opacity = "0";
+            }
+            else {
+                firstSlideOverlay.style.opacity = "0.7";
+            }
+            for (var i = 0; i < this.bar.childElementCount; i++) {
+                var slide = this.bar.children[i];
+                var overlay = slide.children[slide.childElementCount - 1];
+                Lib.CssClass.remove(overlay, fadeInSlideClassName);
+            }
+            sb_st(function () {
+                Lib.CssClass.add(currentSlideOverlay, fadeInSlideClassName);
+            }, 1);
+            sb_st(function () {
+                Lib.CssClass.add(currentSlideOverlay, hideMaskOnSlideClassName);
+                _this.isMaskFadingAnimation = false;
+            }, 300);
+        };
+        Sliding.prototype.slideNext = function () {
+            if (this.isSlidingAnimation()) {
+                return;
+            }
+            var target; // target scrollLeft for viewport
+            var targetSlideShow;
+            // active on prev slide
+            if (this.isSlideShow) {
+                if (this.enableAutoStackableSlideCrossFading && !this.enableHidePagerAndChevron && this.activeSlideIndex < this.bar.childElementCount - 1) {
+                    this.fadingOnSlide(this.bar.children[this.activeSlideIndex + 1]);
+                }
+                else if (this.enableVariedWidth) {
+                    if (this.isMaskFadingAnimation) {
+                        return;
+                    }
+                    this.isMaskFadingAnimation = true;
+                    if (this.activeSlideIndex > (this.bar.childElementCount - 2)) {
+                        this.isMaskFadingAnimation = false;
+                        return;
+                    }
+                    targetSlideShow = this.calculateScrollLeft(this.activeSlideIndex + 1);
+                }
+                else {
+                    if (this.isRightMost())
+                        return;
+                    targetSlideShow = (this.getActiveSlide() + 1) * this.slideWidth();
+                }
+                this.activeSlideIndex++;
+                _w["WireUp"] && WireUp.setValue(this.control, "active", this.activeSlideIndex);
+            }
+            else {
+                if (this.isRightMost())
+                    return;
+                var actualSlideWidth = this.slideWidth() + this.slideRightMargin;
+                var lastSlideNotFullyShown = Math.floor((this.viewport.scrollLeft + this.viewportWidth()) / actualSlideWidth);
+                target = lastSlideNotFullyShown * actualSlideWidth;
+                target = Math.min(target, this.maxScrollLeft);
+            }
+            // active on next slide
+            if (this.enableAutoStackableSlideCrossFading) {
+                this.updatePager();
+                this.updateChevrons();
+            }
+            else {
+                this.slideToOffset(this.isSlideShow ? targetSlideShow : target);
+                if (this.isSlideShow && this.enableVariedWidth) {
+                    var preSlide = this.bar.children[this.activeSlideIndex - 1];
+                    var preSlideOverlay = preSlide.children[preSlide.childElementCount - 1];
+                    this.fadingOnOverlay(preSlideOverlay);
+                }
+            }
+            sj_evt.fire("slideexp_slidenext_move", this.controlId);
+            Log.Log("Next", "SlideExp", "Slide", false, "Type", this.slideExpType, "AppNS", this.appns, "K", this.kvalue);
+            this.updateState(this.activeSlideIndex);
+        };
+        Sliding.prototype.fadingOnSlide = function (nextSlide) {
+            Lib.CssClass.remove(this.bar, firstSlideOpaqueClassName);
+            for (var i = 0; i < this.bar.childElementCount; i++) {
+                var slide = this.bar.children[i];
+                Lib.CssClass.remove(slide, fadeInSlideClassName);
+            }
+            if (this.enableAutoSlidingFade) {
+                sb_st(function () { Lib.CssClass.add(nextSlide, fadeInSlideClassName); }, 500);
+            }
+            else if (this.enableAutoStackableSlideCrossFading) {
+                Lib.CssClass.add(nextSlide, fadeInSlideClassName);
+            }
+        };
+        // slide to the index-th slide
+        Sliding.prototype.slideToIndex = function (index, enableFocus, disableAnimation) {
+            var _this = this;
+            if (enableFocus === void 0) { enableFocus = false; }
+            if (disableAnimation === void 0) { disableAnimation = false; }
+            if (this.isSlidingAnimation()) {
+                return;
+            }
+            if (index < 0 || index >= this.totalSlides) {
+                return;
+            }
+            var target = this.enableVariedWidth ? this.calculateScrollLeft(index) : this.slideWidth() * index;
+            var nextSlide = this.bar.children[index];
+            if (this.enableVariedWidth) {
+                if (this.isMaskFadingAnimation) {
+                    return;
+                }
+                this.isMaskFadingAnimation = true;
+                var currentSlide = this.bar.children[this.activeSlideIndex];
+                var currentSlideOverlay = currentSlide.children[currentSlide.childElementCount - 1];
+                this.activeSlideIndex = index;
+                this.fadingOnOverlay(currentSlideOverlay);
+            }
+            else if (this.enableAutoStackableSlideCrossFading) {
+                this.fadingOnSlide(this.bar.children[index]);
+                this.activeSlideIndex = index;
+                if (!this.enableHidePagerAndChevron) {
+                    this.updatePager(index);
+                    this.updateChevrons();
+                }
+            }
+            else {
+                this.activeSlideIndex = index;
+                if (this.enableAutoSlidingFade) {
+                    this.fadingOnSlide(nextSlide);
+                }
+            }
+            if (enableFocus && this.isAutoSlidingDisabled()) {
+                this.setSlideTabFocus();
+            }
+            // sliding after fade in animation finished
+            sb_st(function () {
+                _this.slideToOffset(target, enableFocus ? function () {
+                    _this.setFocusOnCurrentSlide();
+                } : null, disableAnimation);
+            }, this.enableAutoSlidingFade ? 300 : 0);
+            _w["WireUp"] && WireUp.setValue(this.control, "active", index);
+            sj_evt.fire("slideexp_toActiveIndex", this.controlId, index);
+            this.updateState(this.activeSlideIndex);
+        };
+        // slide to the index-th slide using minimum offset with 3 conditions:
+        // 1. if the slide is not visible, make it center
+        // 2. move left if its right neighbor is not visible
+        // 3. move right if its left neighbor is not visible
+        Sliding.prototype.slideToIndexWithMinOffset = function (index) {
+            if (this.isSlidingAnimation()) {
+                return;
+            }
+            if (index < 0 || index >= this.totalSlides) {
+                return;
+            }
+            if (!this.isSlideVisible(index)) {
+                this.slideToCenter(index);
+            }
+            else {
+                var actualWidthWithMargin = this.slideWidth() + this.slideRightMargin;
+                if (!this.isRightNeighborVisible(index)) {
+                    this.slideToOffset(this.viewport.scrollLeft + actualWidthWithMargin);
+                }
+                else if (!this.isLeftNeighborVisible(index)) {
+                    this.slideToOffset(this.viewport.scrollLeft - actualWidthWithMargin);
+                }
+            }
+            if (this.enableHighlightSelectedSlide) {
+                Lib.CssClass.remove(this.getSlide(this.activeSlideIndex), selectedSlideClassName);
+                this.activeSlideIndex = index;
+                Lib.CssClass.add(this.getSlide(this.activeSlideIndex), selectedSlideClassName);
+            }
+        };
+        Sliding.prototype.isSlideVisible = function (index) {
+            var leftOffset = this.getSlideLeftOffset(index);
+            var rightOffset = this.getSlideRightOffset(index);
+            return this.isPositionVisible(leftOffset) || this.isPositionVisible(rightOffset);
+        };
+        Sliding.prototype.isLeftNeighborVisible = function (index) {
+            var leftOffset = this.getSlideLeftOffset(index - 1);
+            return this.isPositionVisible(leftOffset);
+        };
+        Sliding.prototype.isRightNeighborVisible = function (index) {
+            var rightOffset = this.getSlideRightOffset(index + 1);
+            return this.isPositionVisible(rightOffset);
+        };
+        Sliding.prototype.isPositionVisible = function (position) {
+            return position > this.viewport.scrollLeft && position < this.viewport.scrollLeft + this.viewportWidth() - this.extraBleedingMargin;
+        };
+        Sliding.prototype.getSlideLeftOffset = function (index) {
+            return this.getSlideOffset(index);
+        };
+        Sliding.prototype.getSlideRightOffset = function (index) {
+            return this.getSlideOffset(index + 1);
+        };
+        // index can be totalSlides to get the right offset of last slide
+        Sliding.prototype.getSlideOffset = function (index) {
+            if (index < 0) {
+                index = 0;
+            }
+            else if (index > this.totalSlides) {
+                index = this.totalSlides;
+            }
+            var slideWidth = this.slideWidth() + this.slideRightMargin;
+            var offset = index * slideWidth;
+            if (index === this.totalSlides) {
+                offset -= this.slideRightMargin;
+            }
+            return offset;
+        };
+        Sliding.prototype.slideToCenter = function (index) {
+            var actualWidthWithMargin = this.slideWidth() + this.slideRightMargin;
+            var offset = index * actualWidthWithMargin;
+            var actualOffset = offset - (this.viewportWidth() / 2) + actualWidthWithMargin / 2;
+            this.slideToOffset(actualOffset);
+        };
+        Sliding.prototype.isSlidingAnimation = function () {
+            return this.ani != null || Lib.CssClass.contains(this.bar, "anim");
+        };
+        Sliding.prototype.setFocusOnCurrentSlide = function () {
+            var activeSlide = this.bar.children[this.activeSlideIndex];
+            activeSlide.focus();
+        };
+        // slide to scrolling offset, in px
+        Sliding.prototype.slideToOffset = function (target, onEnd, disableAnimation) {
+            if (onEnd === void 0) { onEnd = null; }
+            if (disableAnimation === void 0) { disableAnimation = false; }
+            // TFS #5322733: merge updateMaxScrollLeft and maxScrollLeft
+            this.updateMaxScrollLeft();
+            var maxOffset = this.maxScrollLeft;
+            if (target < 0) {
+                target = 0;
+            }
+            else if (target > maxOffset) {
+                target = maxOffset;
+            }
+            this.updatePager();
+            if (disableAnimation) {
+                this.viewport.scrollLeft = target;
+                onEnd && onEnd();
+            }
+            else if (this.isCssTransitionSupported()) {
+                this.slideToOffsetUsingTransition(target, onEnd);
+            }
+            else {
+                this.slideToOffsetUsingJs(target, onEnd);
+            }
+        };
+        Sliding.prototype.slideToOffsetUsingTransition = function (target, onEnd) {
+            var _this = this;
+            if (onEnd === void 0) { onEnd = null; }
+            if (!this.enableAutoSlidingFade) {
+                var offset = target - this.viewport.scrollLeft;
+                // on IE/Edge, offset 0 doesn't have transition/transitionend
+                if (offset === 0) {
+                    onEnd && onEnd();
+                    return;
+                }
+                // TFS #5322733: "transitionend" event fired before transition ends
+                var onTransitionEnd = function () {
+                    Lib.CssClass.remove(_this.bar, "anim"); // we should not trigger animation when replacing margin-left with scrollLeft
+                    // We remove the margin-left, however, to keep the slidebar not moved, we need to set the scrollLeft asap.
+                    // We should use scrollLeft rather than margin-left, when not doing animation, because scrollLeft is the native way shifting slides, esp. when
+                    // the browser supports native touch based scrolling
+                    _this.bar.style.transition = "x"; // to workaround Cortana buug, without it, transitionend events will interleave, which causes jittering in slideshow, and unresponsive in the rightmost of carousel
+                    _this.bar.style.marginLeft = "";
+                    _this.viewport.scrollLeft = target;
+                    // without it, because the scroll event may not fire at the exact last second, the chevron may not disappear correctly after scrolled to the right most
+                    _this.updateChevrons();
+                    sj_ue(_this.bar, "transitionend", onTransitionEnd);
+                    sj_ue(_this.bar, "webkitTransitionEnd", onTransitionEnd);
+                    sj_ue(_this.bar, "oTransitionEnd", onTransitionEnd);
+                    onEnd && onEnd();
+                };
+                sj_be(this.bar, "transitionend", onTransitionEnd);
+                sj_be(this.bar, "webkitTransitionEnd", onTransitionEnd);
+                sj_be(this.bar, "oTransitionEnd", onTransitionEnd);
+                this.bar.style.transition = ""; // without it, Cortana mobile won't set the transition right
+                Lib.CssClass.add(this.bar, "anim");
+                this.bar.style.marginLeft = "" + (-offset) + "px";
+            }
+            else {
+                this.viewport.scrollLeft = target;
+                onEnd && onEnd();
+            }
+        };
+        Sliding.prototype.slideToOffsetUsingJs = function (target, onEnd) {
+            var _this = this;
+            if (onEnd === void 0) { onEnd = null; }
+            this.ani = new sj_anim(function (ele, step) {
+                ele.scrollLeft = step;
+            });
+            var timePerAnimationStep = this.ani.getInterval() / 1000; // in second
+            var totalSteps = this.slidingTimeSpan / timePerAnimationStep;
+            var pixelsPerStep = this.slideWidth() / totalSteps;
+            this.ani.init(this.viewport, this.viewport.scrollLeft, target, pixelsPerStep, function () {
+                _this.ani = null;
+                _this.updateChevrons();
+                _this.updateAjax();
+                onEnd && onEnd();
+            });
+        };
+        // have we scrolled to the left most?
+        Sliding.prototype.isLeftMost = function () {
+            if (this.enableVariedWidth || (this.enableAutoStackableSlideCrossFading && !this.enableHidePagerAndChevron)) {
+                return this.activeSlideIndex === 0;
+            }
+            return this.viewport.scrollLeft <= 0;
+        };
+        // have we scrolled to the right most?
+        Sliding.prototype.isRightMost = function () {
+            if (this.enableVariedWidth || (this.enableAutoStackableSlideCrossFading && !this.enableHidePagerAndChevron)) {
+                return this.activeSlideIndex === this.bar.childElementCount - 1;
+            }
+            return Math.ceil(this.viewport.scrollLeft) >= this.maxScrollLeft;
+        };
+        /* Disable chevrons if we have reached the leftmost/rightmost */
+        Sliding.prototype.updateChevrons = function () {
+            if (this.isLeftMost() && this.isRightMost()) {
+                sj_evt.fire("slideexp_leftrightmost", this.controlId);
+                return;
+            }
+            if (this.isLeftMost()) {
+                sj_evt.fire("slideexp_leftmost", this.controlId);
+                return;
+            }
+            if (this.isRightMost()) {
+                sj_evt.fire("slideexp_rightmost", this.controlId);
+                return;
+            }
+            sj_evt.fire("slideexp_middle", this.controlId);
+        };
+        Sliding.prototype.nextSlide = function (index) {
+            return (index + 1) % this.totalSlides;
+        };
+        Sliding.prototype.autoSlide = function (index) {
+            var _this = this;
+            if (this.isAutoSlidingDisabled()) {
+                return;
+            }
+            if (this.isAutoSlidingPaused()) {
+                // When paused, we keep the interval with dryrun until it is resumed
+                sb_st(function () { _this.autoSlide(index); }, this.autoSlidingInterval * 1000);
+                return;
+            }
+            var nextIndex = this.nextSlide(index);
+            this.slideToIndex(nextIndex);
+            sb_st(function () {
+                _this.autoSlide(nextIndex);
+            }, this.autoSlidingInterval * 1000);
+            sj_evt.fire("autoSlide");
+        };
+        // args[0]: event name
+        // args[1]: event target id
+        Sliding.prototype.isEventForMe = function (args) {
+            var targetId = args[1];
+            return targetId == this.controlId || targetId == (this.controlId + "c");
+        };
+        Sliding.prototype.updateState = function (activeIndex) {
+            if (this.stateKey == "") {
+                return;
+            }
+            _w["StateUpdater"] && _w["StateUpdater"].update(this.stateKey, activeIndex.toString());
+        };
+        return Sliding;
+    }());
+    var instances = {};
+    function init(id, controlId, autoSlideInterval, isCarousel, slideRightMargin, errMsg, showChevronAllTime, enableVariedWidth, enableAutoSlidingFade, enableAutoStackableSlideCrossFading, enableHidePagerAndChevron, enableNegativeBleeding, enableCarouselSeeMore, enableHighlightSelectedSlide, shownSlideIndex, enableDefaultChevron, hideChevronsOnStart, enableDropShadow) {
+        var ajaxDataLoader = new AjaxDataLoader.AjaxDataLoader('SlideExp', errMsg, true);
+        var sliding = new Sliding(controlId, autoSlideInterval, isCarousel, slideRightMargin, ajaxDataLoader, showChevronAllTime, enableVariedWidth, enableAutoSlidingFade, enableAutoStackableSlideCrossFading, enableHidePagerAndChevron, enableNegativeBleeding, enableCarouselSeeMore, enableHighlightSelectedSlide, shownSlideIndex, enableDefaultChevron, hideChevronsOnStart, enableDropShadow);
+        sliding.init();
+        instances[id] = sliding;
+        if (_w["StateUpdater"]) {
+            var targetState = _w["StateUpdater"].restore(sliding.stateKey);
+            if (targetState == null) {
+                return;
+            }
+            var targetIndex = parseInt(targetState);
+            sliding.slideToIndex(targetIndex, null, true);
+        }
+    }
+    SlideExperience.init = init;
+    function getSlideById(id) {
+        for (var key in instances) {
+            if (key.indexOf(id) === 0) {
+                return instances[key];
+            }
+        }
+    }
+    // Slide the id-th control to index-th slide
+    function slide(id, index) {
+        var sliding = getSlideById(id);
+        if (sliding && !sliding.enableAutoStackableSlideCrossFading) {
+            sliding.disableAutoSliding();
+            sliding.disableAutoSlidingAnimation();
+            sliding.slideToIndex(index);
+        }
+    }
+    SlideExperience.slide = slide;
+    function getVisibleSlidesIndices(id) {
+        var sliding = getSlideById(id);
+        var slidesIndices = [];
+        if (sliding) {
+            slidesIndices = sliding.getVisibleSlidesIndices();
+        }
+        return slidesIndices;
+    }
+    SlideExperience.getVisibleSlidesIndices = getVisibleSlidesIndices;
+    function isSlideVisible(id, slideIndex) {
+        var sliding = getSlideById(id);
+        var visiblePercentage = sliding.getVisiblePercentage(slideIndex);
+        return new VisibleSlide(slideIndex, visiblePercentage);
+    }
+    SlideExperience.isSlideVisible = isSlideVisible;
+    // notify that slideexperience module is ready
+    sj_evt.fire("slideexperience_init", SlideExperience);
+    _w["WireUp"] && WireUp.init("slideexp_init", function (node) {
+        if (node) {
+            var controlId = node.getAttribute("data-control-id");
+            WireUp.onUpdate(node, "select", function (node, from, to, value) {
+                sj_evt.fire("slideexp_slidetoindex", controlId, value);
+            });
+        }
+    });
+})(SlideExperience || (SlideExperience = {}));

@@ -1,0 +1,115 @@
+/* Pager */
+///<reference path="declarations\Shared.d.ts" />
+///<reference path="declarations\CssClass.d.ts" />
+var Pager;
+(function (Pager_1) {
+    // const
+    var maxPagesForDots = 5;
+    var defaultActiveSlideIndex = 0;
+    // should keep in sync with spark
+    var activeClassName = 'active';
+    var Pager = (function () {
+        function Pager(id, controlId, totalPages, enableInteraction, enablePagerOverlay, enablePagerSeeMore, pagerLabels, activeSlideIndex) {
+            var _this = this;
+            var pager = _ge(id);
+            if (!pager)
+                return;
+            this.pager = pager;
+            this.controlId = controlId;
+            this.pagerLabels = pagerLabels;
+            this.activeIndex = (activeSlideIndex >= 0) ? activeSlideIndex : defaultActiveSlideIndex;
+            if (totalPages <= maxPagesForDots) {
+                for (var i = 0; i < totalPages; ++i) {
+                    var dot = this.getDot(i);
+                    dot["pagerindex"] = i;
+                    sj_be(dot, "click", function (evt) {
+                        if (enableInteraction) {
+                            sj_evt.fire("slideexp_slidetoindex", _this.controlId, evt.target["pagerindex"]);
+                        }
+                        Log.Log("Click", "Pager", "ID" + evt.target["pagerindex"], false);
+                    });
+                }
+            }
+            if (enablePagerSeeMore) {
+                var pagerSeeMore = _ge(this.pager.id + "_pager_seemore");
+                // enable fade in/out animation and put the see more div in the latest level
+                Lib.CssClass.add(pagerSeeMore, "enable_fade");
+                Lib.CssClass.add(pager, "enable_fade");
+                Lib.CssClass.add(pagerSeeMore, "pager_seemore_hidden");
+            }
+            sj_evt.bind("pager_updateindex", function (args) {
+                if (!_this.isForMe(args)) {
+                    return;
+                }
+                var index = args[2];
+                _this.updatePager(index, totalPages, enablePagerOverlay, enablePagerSeeMore);
+            });
+        }
+        Pager.prototype.getDot = function (index) {
+            var ul = this.pager.firstElementChild;
+            return ul.children[index];
+        };
+        Pager.prototype.getActiveNode = function () {
+            return this.pager.firstElementChild;
+        };
+        Pager.prototype.updatePager = function (index, totalPages, enablePagerOverlay, enablePagerSeeMore) {
+            var pager = this.pager;
+            if (pager == null || !isFinite(index) || index < 0 || index >= totalPages) {
+                return;
+            }
+            if (totalPages <= maxPagesForDots) {
+                var activeDot = this.getDot(this.activeIndex);
+                Lib.CssClass.remove(activeDot, activeClassName);
+                var dot = this.getDot(index);
+                Lib.CssClass.add(dot, activeClassName);
+            }
+            else {
+                var activePageNode = this.getActiveNode();
+                activePageNode.innerHTML = this.pagerLabels && this.pagerLabels[index] ? this.pagerLabels[index] : "" + (index + 1);
+            }
+            if (enablePagerSeeMore) {
+                var pagerSeeMore = _ge(this.pager.id + "_pager_seemore");
+                this.seeMoreFade(index, enablePagerOverlay, totalPages, pager, pagerSeeMore);
+            }
+            this.activeIndex = index;
+        };
+        Pager.prototype.seeMoreFade = function (index, enablePagerOverlay, totalPages, pager, pagerSeeMore) {
+            if (!enablePagerOverlay) {
+                this.pager.parentElement.style.position = "relative";
+            }
+            if (index === totalPages - 1) {
+                Lib.CssClass.remove(pagerSeeMore, "pager_seemore_hidden");
+                sb_st(function () {
+                    Lib.CssClass.add(pager, "pager_fadeOut");
+                }, 600);
+                sb_st(function () {
+                    Lib.CssClass.add(pagerSeeMore, "pager_seemore_fadeIn");
+                }, 600);
+            }
+            else if (index === totalPages - 2 || index === 0) {
+                Lib.CssClass.remove(pagerSeeMore, "pager_seemore_fadeIn");
+                Lib.CssClass.remove(pager, "pager_fadeOut");
+                Lib.CssClass.add(pagerSeeMore, "pager_seemore_hidden");
+            }
+        };
+        // args[0]: event name
+        // args[1]: event target id
+        Pager.prototype.isForMe = function (args) {
+            return args[1] === this.controlId;
+        };
+        return Pager;
+    }());
+    Pager_1.Pager = Pager;
+    var instances = {};
+    function createInstance(id, controlId, totalPages, enableInteraction, enablePagerOverlay, enablePagerSeeMore, pagerLabels, activeSlideIndex) {
+        if (instances[id]) {
+            return instances[id];
+        }
+        var pager = new Pager(id, controlId, totalPages, enableInteraction, enablePagerOverlay, enablePagerSeeMore, pagerLabels, activeSlideIndex);
+        instances[id] = pager;
+        return pager;
+    }
+    Pager_1.createInstance = createInstance;
+    // notify that pager module is ready
+    sj_evt.fire("pager_init", Pager);
+})(Pager || (Pager = {}));

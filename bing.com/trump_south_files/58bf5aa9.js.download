@@ -1,0 +1,376 @@
+/// <reference path="../../../../Shared/Content/Content/script/Declarations/Shared.d.ts" />
+/// <reference path="../../../../Shared/Content/Content/script/Declarations/Text.d.ts" />
+/// <reference path="../../../../Feedback/Src/Content/Script/Declarations/Protocol.d.ts" />
+/// <reference path="Definitions/Feedback.d.ts" />
+/// <reference path="Definitions/BingAtWork.d.ts" />
+/// <reference path="BingAtWork.ts" />
+var BingAtWork;
+(function (BingAtWork) {
+    var Feedback;
+    (function (Feedback) {
+        var FeedbackForm = (function () {
+            function FeedbackForm() {
+                var _this = this;
+                this.tenantMetadata = bfbConfig.tenantMetadata;
+                this.isMsftTenant = bfbConfig.ft.msftfdbk.e;
+                sj_evt.bind(BingAtWork.cmdHandled, function (args) { return _this.upn = args.length === 2 ? args[1] : null; }, true, null, true);
+            }
+            FeedbackForm.prototype.showForm = function (feedback) {
+                if (feedback === void 0) { feedback = ""; }
+                var feedbackForm = _ge(FeedbackForm.ctnrId);
+                if (feedbackForm == null) {
+                    feedbackForm = this.createFeedbackForm(feedback);
+                }
+                else {
+                    var txtArea = _ge(FeedbackForm.txtBoxId);
+                    if (txtArea != null) {
+                        txtArea.value = feedback;
+                    }
+                    feedbackForm.className = FeedbackForm.ctnrId;
+                }
+                feedbackForm.scrollIntoView(false);
+            };
+            FeedbackForm.prototype.hideForm = function (remove) {
+                var feedbackForm = _ge(FeedbackForm.ctnrId);
+                if (feedbackForm != null) {
+                    if (remove) {
+                        feedbackForm.parentNode.removeChild(feedbackForm);
+                    }
+                    else {
+                        feedbackForm.className = FeedbackForm.ctnrId + " b_hide";
+                    }
+                }
+            };
+            FeedbackForm.prototype.createFeedbackForm = function (feedback) {
+                var _this = this;
+                // Create the feedback form Html
+                var feedbackForm = sj_ce("form", FeedbackForm.frmId);
+                feedbackForm.style.display = "block";
+                // company Logo
+                var feedbackHeader = sj_ce("div", "bw-fbHead");
+                var companyLogo = sj_ce("div", "bw-fbLogo");
+                companyLogo.setAttribute("style", "background-image:url(data:image/png;base64," + this.tenantMetadata.iconSmall + ");");
+                feedbackHeader.appendChild(companyLogo);
+                this.addText(companyLogo, "h1", BingAtWork.Strings["FeedbackTitle"]);
+                feedbackForm.appendChild(feedbackHeader);
+                // Radio Buttons.
+                var radioButtons = sj_ce("div");
+                var msftdiv = sj_ce("div", "tellms");
+                this.addText(msftdiv, "h4", BingAtWork.Strings["FeedbackTellMicrosoft"]);
+                radioButtons.appendChild(msftdiv);
+                this.addLabeledInput(radioButtons, "radio", BingAtWork.Strings["FeedbackOption3"], "type", true, "1");
+                this.addLabeledInput(radioButtons, "radio", BingAtWork.Strings["FeedbackOption1"], "type", false, "2");
+                this.addLabeledInput(radioButtons, "radio", BingAtWork.Strings["FeedbackOption2"], "type", false, "3");
+                if (this.isMsftTenant) {
+                    this.addLabeledInput(radioButtons, "radio", BingAtWork.Strings["FeedbackOption5"], "type", false, "4");
+                }
+                else {
+                    var compdiv = sj_ce("div", "tell");
+                    this.addText(compdiv, "h4", BingAtWork.Strings["FeedbackTellYourCompany"]);
+                    radioButtons.appendChild(compdiv);
+                    this.addLabeledInput(radioButtons, "radio", BingAtWork.Strings["FeedbackOption4"], "type", false, "5");
+                }
+                feedbackForm.appendChild(radioButtons);
+                // Text Area
+                this.addTextArea(feedbackForm, FeedbackForm.txtBoxId, BingAtWork.Strings["FeedbackEnterFeedback"], /*required*/ true, feedback);
+                // Screenshot, Alias CheckBoxes & Privacy Link.
+                this.addLabeledInput(feedbackForm, "checkbox", BingAtWork.Strings["FeedbackAllowScreenshot"], FeedbackForm.ss, true);
+                if (this.isMsftTenant) {
+                    this.addLabeledInput(feedbackForm, "checkbox", BingAtWork.Strings["FeedbackAllowAlias"], FeedbackForm.alias, true);
+                }
+                var privacyDiv = sj_ce("div", "bw-fbPlc");
+                var viewtext = this.addText(privacyDiv, "h4", BingAtWork.Strings["FeedbackView"]);
+                this.privacyPolicyUrl = this.tenantMetadata.feedbackPrivacyLink;
+                this.addLink(viewtext, "bw-fbPlc", this.privacyPolicyUrl, BingAtWork.Strings["FeedbackPrivacy"]);
+                feedbackForm.appendChild(privacyDiv);
+                if (this.isMsftTenant) {
+                    var disclaimerContainer = sj_ce("div", "bw-fbDisclmr");
+                    var message = BingAtWork.Strings["FeedbackDisclaimer"];
+                    this.addText(disclaimerContainer, "label", message);
+                    feedbackForm.appendChild(disclaimerContainer);
+                }
+                //Buttons
+                var actionButtons = sj_ce("div");
+                actionButtons.className = "bw-fbBtn";
+                this.addButton(actionButtons, "submit", BingAtWork.Strings["FeedbackSend"]);
+                var closeButton = this.addButton(actionButtons, "button", BingAtWork.Strings["FeedbackCancel"]);
+                sj_be(closeButton, "click", function () { return _this.hideForm(false); });
+                feedbackForm.appendChild(actionButtons);
+                // Add form to container and container to page
+                var feedbackContainer = sj_ce("div", FeedbackForm.ctnrId, FeedbackForm.ctnrId);
+                sj_be(feedbackContainer, "submit", this.onSubmitForm.bind(this)); // Add form submit event - runs when user presses Send
+                feedbackContainer.appendChild(feedbackForm);
+                _ge(FeedbackForm.linkId).parentNode.appendChild(feedbackContainer);
+                return feedbackContainer;
+            };
+            // HTML helper functions.
+            FeedbackForm.prototype.addLabeledInput = function (targetElement, type, labelText, name, checked, value, wrapperClass, inputClass, labelClass) {
+                if (name === void 0) { name = undefined; }
+                if (checked === void 0) { checked = undefined; }
+                if (value === void 0) { value = undefined; }
+                if (wrapperClass === void 0) { wrapperClass = "bw-wrap"; }
+                if (inputClass === void 0) { inputClass = null; }
+                if (labelClass === void 0) { labelClass = null; }
+                var wrapper = sj_ce("div", null, wrapperClass);
+                var input = sj_ce("input", null, inputClass);
+                input.type = type;
+                if (checked) {
+                    input.checked = true;
+                }
+                if (typeof name == "string") {
+                    input.name = name;
+                }
+                if (typeof value == "string") {
+                    input.value = value;
+                }
+                var label = sj_ce("label", null, labelClass);
+                label.appendChild(input); // Append input inside label because we stopped using ids for each radio button
+                label.appendChild(_d.createTextNode(labelText)); // Add the text of the label only after the actual radio button
+                wrapper.appendChild(label);
+                targetElement.appendChild(wrapper);
+                return input;
+            };
+            FeedbackForm.prototype.addLink = function (targetElement, id, url, anchorText) {
+                var link = sj_ce("a", id);
+                link.href = url;
+                link.target = "_blank";
+                Shared.setText(link, anchorText);
+                targetElement.appendChild(link);
+                return link;
+            };
+            FeedbackForm.prototype.addTextArea = function (targetElement, id, placeholder, required, value) {
+                if (required === void 0) { required = true; }
+                if (value === void 0) { value = ""; }
+                var area = sj_ce("textarea", id);
+                area.placeholder = placeholder;
+                area.required = true;
+                area.value = value;
+                targetElement.appendChild(area);
+                return area;
+            };
+            FeedbackForm.prototype.addText = function (targetElement, tagType, text, id, className) {
+                var textTag = sj_ce(tagType);
+                Shared.setText(textTag, text);
+                if (id != null) {
+                    textTag.id = id;
+                }
+                if (className != null) {
+                    textTag.className = className;
+                }
+                targetElement.appendChild(textTag);
+                return textTag;
+            };
+            FeedbackForm.prototype.addButton = function (targetElement, buttonType, labelText) {
+                var button = sj_ce("input");
+                button.type = buttonType;
+                button.value = labelText;
+                targetElement.appendChild(button);
+                return button;
+            };
+            FeedbackForm.prototype.getPageCss = function () {
+                var css = "";
+                for (var i = 0; i < _d.styleSheets.length; i++) {
+                    css += _d.styleSheets.item(i).ownerNode["outerHTML"].toString();
+                }
+                return css;
+            };
+            FeedbackForm.prototype.constructHtmlPayload = function (answerContainer) {
+                var feedbackContainer = answerContainer.getElementsByClassName(FeedbackForm.ctnrId)[0];
+                if (feedbackContainer != null) {
+                    feedbackContainer.parentNode.removeChild(feedbackContainer);
+                }
+                return "<html><head><meta http-equiv=\"X-UA-Compatible\" content=\"IE=8\">" + this.getPageCss() + "</head><body><div id =\"bw-ans\">" + answerContainer.outerHTML + "</div></body></html>";
+            };
+            FeedbackForm.prototype.scrub = function (rootElement) {
+                var elements = this.getAllElements(rootElement);
+                var hasMatch = function (e, dataTag, includeDescendants) {
+                    if (includeDescendants === void 0) { includeDescendants = false; }
+                    var element = e;
+                    var matchSelf = element.matches("[data-tag*=\"" + dataTag + "\"]");
+                    if (includeDescendants) {
+                        return matchSelf || element.matches("[data-tag*=\"" + dataTag + "\"] *");
+                    }
+                    else {
+                        return matchSelf;
+                    }
+                };
+                try {
+                    elements.forEach(function (e) {
+                        if (hasMatch(e, "bw-scrubFont")) {
+                            // change bookmark icons to default icon
+                            e.className = "bw-msfont doublebookmark";
+                        }
+                        else if (hasMatch(e, "bw-scrubImg")) {
+                            // remove profile images
+                            e.style.backgroundImage = "";
+                        }
+                        else if (hasMatch(e, "bw-noscrub", true)) {
+                            // no scrubbing
+                        }
+                        else {
+                            if (e.tagName === "A") {
+                                e.setAttribute("href", "");
+                            }
+                            e.setAttribute("title", "");
+                            if (e.children.length === 0) {
+                                Shared.setText(e, "scrub");
+                            }
+                        }
+                    });
+                }
+                catch (e) {
+                    dbg.trace(BingAtWork.bawSourceName, "FeedbackViewModel scrub exception", e);
+                }
+            };
+            FeedbackForm.prototype.getAllElements = function (rootElement) {
+                var elements = rootElement.getElementsByTagName('*');
+                var arr = [];
+                for (var i = 0; i < elements.length; i++) {
+                    arr.push(elements[i]);
+                }
+                return arr;
+            };
+            FeedbackForm.prototype.getUserEmail = function () {
+                if (this.upn) {
+                    return this.upn;
+                }
+                // failed to get upn from handledCommand
+                // try to retrive user email from id control image src
+                var idControlThumbnail = _ge("id_p");
+                var idControlThumbnailSrc = idControlThumbnail == null ? null : idControlThumbnail.getAttribute("src");
+                var srcSplits = idControlThumbnailSrc == null ? [] : idControlThumbnailSrc.toLowerCase().split("user=");
+                return srcSplits.length < 2 ? "N/A" : srcSplits[1];
+            };
+            // Button Actions
+            FeedbackForm.prototype.onSubmitForm = function (event) {
+                // prevents default click action
+                event.preventDefault();
+                var comment = _ge(FeedbackForm.txtBoxId)["value"];
+                comment = comment.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                var feedbackType = this.determineFeedbackType();
+                var htmlPayload = "";
+                var bawClone = (_ge("bw-ans").cloneNode(true));
+                if (this.isMsftTenant) {
+                    htmlPayload = this.constructHtmlPayload(bawClone);
+                    comment = this.getFormValue(FeedbackForm.alias, "checked") ? comment + " (From: " + this.getUserEmail() + ")" : comment;
+                }
+                else {
+                    this.scrub(bawClone.querySelector("#bw-tar"));
+                    htmlPayload = this.constructHtmlPayload(bawClone);
+                }
+                var searchBox = _ge("sb_form_q");
+                var query = searchBox == null || !searchBox.hasAttribute("value") ? "N/A" : searchBox.getAttribute("value");
+                // construct payload
+                var backendPayload = {
+                    partner: "BingLegacy",
+                    feedbackType: "feedback",
+                    impression_guid: _G.IG,
+                    text: comment,
+                    url: location.href,
+                    vertical: "BingAtWork",
+                    original_html: htmlPayload,
+                    html: htmlPayload,
+                    width: _w.innerWidth,
+                    height: _w.innerHeight,
+                    source: "BingAtWork",
+                    query: query,
+                    timeStamp: Date.now,
+                    keywords: "BingAtwork",
+                    sendMail: "True"
+                };
+                if (!this.getFormValue(FeedbackForm.ss, "checked")) {
+                    delete backendPayload["original_html"];
+                    delete backendPayload["html"];
+                }
+                if (feedbackType === 5 && this.tenantMetadata.adminEmail != null) {
+                    // send mail to admin when non-MSFT user selected 'Correct a mistake'
+                    window.location.href = "mailto:" + this.tenantMetadata.adminEmail + "?subject=Bing@Work Feedback&body=" + encodeURIComponent(comment);
+                }
+                this.sendToBackend(backendPayload, /* the object to be serialized to JSON and sent */ undefined, /* the name of the module, leave undefined */ undefined, /* enforced_id, leave undefined */ undefined, /* whether feedback is old, if it's been loaded from HTML5 localStorage, leave undefined */ undefined, /* on success callback */ undefined /* on error callback, same as on success as we don't care to display whether there was an error to the user */);
+                this.showThankYou();
+            };
+            FeedbackForm.prototype.determineFeedbackType = function () {
+                var form = _ge(FeedbackForm.frmId), radioButtons = form.elements["type"], type = 1;
+                for (var i = 0, len = radioButtons.length; i < len; i++) {
+                    if (radioButtons[i].checked) {
+                        type = +radioButtons[i].value; // + converts the string to number
+                        break;
+                    }
+                }
+                return type;
+            };
+            FeedbackForm.prototype.getFormValue = function (elementName, propertyName) {
+                var form = _ge(FeedbackForm.frmId);
+                var input = form.elements[elementName];
+                return input ? input[propertyName] : null;
+            };
+            FeedbackForm.prototype.sendToBackend = function (obj, moduleName, customDebugId, localStorageFlag, onSuccessCallback, onErrorCallback) {
+                var feedbackUploadUrl = "/customerfeedback/queue/full/submission", maxRetries = 2, requestTimeout = 10000;
+                function onSendSuccess(obj, debugId, attemptCount, onSuccessCallback) {
+                    if (onSuccessCallback === void 0) { onSuccessCallback = undefined; }
+                    // sends data to FrontDoor as client instrumentation
+                    if (onSuccessCallback) {
+                        onSuccessCallback(debugId);
+                    }
+                }
+                function onSendFailure(obj, debugId, attemptCount, onErrorCallback) {
+                    if (onErrorCallback === void 0) { onErrorCallback = undefined; }
+                    // sends data to FrontDoor as client instrumentation
+                    if (onErrorCallback) {
+                        onErrorCallback(debugId);
+                    }
+                }
+                function SendAttempt(obj, customDebugId, attemptCount, localStorageFlag, onSuccessCallback, onErrorCallback) {
+                    if (localStorageFlag === void 0) { localStorageFlag = undefined; }
+                    if (onSuccessCallback === void 0) { onSuccessCallback = undefined; }
+                    if (onErrorCallback === void 0) { onErrorCallback = undefined; }
+                    var debugId = (typeof customDebugId === 'undefined') ? Math.random().toString(36).substring(7) : customDebugId, isOld = (typeof localStorageFlag === 'undefined') ? false : localStorageFlag, objStr = JSON.stringify(obj);
+                    var request = sj_gx();
+                    request.open("POST", feedbackUploadUrl, true); // true means asynchronous
+                    request.timeout = requestTimeout;
+                    request.setRequestHeader("Content-Type", "application/json; charset=UTF-8");
+                    request.onreadystatechange = (function () {
+                        if (request.readyState === request.DONE) {
+                            if (request.status === 204) {
+                                // We have successfully sent the payload
+                                onSendSuccess(obj, debugId, attemptCount, onSuccessCallback);
+                            }
+                            else {
+                                if (attemptCount >= maxRetries) {
+                                    onSendFailure(obj, debugId, attemptCount, onErrorCallback);
+                                }
+                                else {
+                                    // Try resending the payload as it has failed to upload
+                                    SendAttempt.bind(this)(obj, debugId, ++attemptCount, /*localStorageFlag*/ isOld, onSuccessCallback, onErrorCallback);
+                                }
+                            }
+                        }
+                    });
+                    request.send(objStr);
+                }
+                SendAttempt.bind(this)(obj, customDebugId, /*attemptCount*/ 1, false, onSuccessCallback, onErrorCallback);
+            };
+            FeedbackForm.prototype.showThankYou = function () {
+                var _this = this;
+                var form = _ge(FeedbackForm.frmId);
+                form.innerHTML = "";
+                var thankYou = sj_ce("div");
+                this.addText(thankYou, "h1", BingAtWork.Strings["FeedbackThank"]);
+                form.appendChild(thankYou);
+                var actionButtons = sj_ce("div", null, "bw-fbBtn ty");
+                var closeButton = this.addButton(actionButtons, "button", "Close");
+                sj_be(closeButton, "click", function () { return _this.hideForm(true); });
+                form.appendChild(actionButtons);
+            };
+            FeedbackForm.ss = "screenshot";
+            FeedbackForm.alias = "alias";
+            FeedbackForm.ctnrId = "bw-fbCtnr"; // Feedback container div;
+            FeedbackForm.frmId = "bw-fbfrm"; // Feedback form id
+            FeedbackForm.txtBoxId = "bw-fbBox"; // id needed for resetting form
+            FeedbackForm.linkId = "bw-fb";
+            return FeedbackForm;
+        }());
+        Feedback.FeedbackForm = FeedbackForm;
+        sj_evt.bind("onBawInitFinish", function () { return _w["feedback"] = new Feedback.FeedbackForm(); }, true, null, true);
+    })(Feedback = BingAtWork.Feedback || (BingAtWork.Feedback = {}));
+})(BingAtWork || (BingAtWork = {}));

@@ -1,0 +1,138 @@
+/* Ajax Data Loader */
+///<reference path="declarations\Shared.d.ts" />
+///<reference path="AjaxRequestProcessor.ts" />
+var AjaxDataLoader;
+(function (AjaxDataLoader_1) {
+    // consts
+    // should keep in sync with spark
+    var dataurlName = 'dataurl';
+    var loadingTimeStampName = 'loadts';
+    var autoReloadingIntervalName = 'rinterval';
+    function data(node, name, value) {
+        if (value === void 0) { value = null; }
+        if (!node) {
+            return null;
+        }
+        var attr = "data-" + name;
+        if (value === null) {
+            return node.getAttribute(attr);
+        }
+        else {
+            node.setAttribute(attr, value);
+            return value;
+        }
+    }
+    function showLoadingIndicator(container) {
+        var loadingIndicatorContainer = sj_ce("div", null, "spinner");
+        var spinner = sj_ce("div", null, "inner");
+        loadingIndicatorContainer.appendChild(spinner);
+        // load a spinning gif to signal loading of content
+        container.insertBefore(loadingIndicatorContainer, container.childNodes[0]);
+    }
+    var AjaxDataLoader = (function () {
+        function AjaxDataLoader(loggingTag, ajaxErrorMsg, enableLoadingIndicator) {
+            this.loggingTag = loggingTag;
+            this.ajaxErrorMsg = ajaxErrorMsg;
+            this.enableLoadingIndicator = enableLoadingIndicator;
+        }
+        AjaxDataLoader.prototype.loadAjaxData = function (container, onEnd, onLoadSuccess, onLoadError, onScriptException, onBeforeContentLoad) {
+            if (onEnd === void 0) { onEnd = function (x) { }; }
+            if (onLoadSuccess === void 0) { onLoadSuccess = function (x) { }; }
+            if (onLoadError === void 0) { onLoadError = function (x, r, s) { }; }
+            if (onScriptException === void 0) { onScriptException = function (x) { }; }
+            if (onBeforeContentLoad === void 0) { onBeforeContentLoad = function () { }; }
+            var dataurl = data(container, dataurlName);
+            if (!dataurl) {
+                onEnd && onEnd(container);
+                return;
+            }
+            // append data url with IG for linking all activities to original page
+            dataurl += (dataurl.indexOf("?") != -1 ? "&" : "?") + "IG=" + _G.IG;
+            var lastLoadingTime = Number(data(container, loadingTimeStampName));
+            var autoReloadingInterval = this.autoReloadingInterval(container);
+            var nowTime = sb_gt();
+            var noAutoReloading = isNaN(autoReloadingInterval) || autoReloadingInterval <= 0;
+            if (noAutoReloading) {
+                // don't load it if not auto reloading
+                if (lastLoadingTime > 0) {
+                    onEnd && onEnd(container);
+                    return;
+                }
+                this.enableLoadingIndicator && showLoadingIndicator(container);
+                loadAjaxDataInternal(container, dataurl, this.loggingTag, this.ajaxErrorMsg, onEnd, onLoadSuccess, onLoadError, onScriptException, onBeforeContentLoad);
+                data(container, loadingTimeStampName, nowTime.toString());
+                return;
+            }
+            // only show indicator for the first reloading
+            if (lastLoadingTime <= 0) {
+                this.enableLoadingIndicator && showLoadingIndicator(container);
+            }
+            if (nowTime - lastLoadingTime > autoReloadingInterval * 1000) {
+                loadAjaxDataInternal(container, dataurl, this.loggingTag, this.ajaxErrorMsg);
+                data(container, loadingTimeStampName, nowTime.toString());
+            }
+        };
+        AjaxDataLoader.prototype.autoReloadingInterval = function (container) {
+            return Number(data(container, autoReloadingIntervalName));
+        };
+        return AjaxDataLoader;
+    }());
+    AjaxDataLoader_1.AjaxDataLoader = AjaxDataLoader;
+    function loadAjaxDataInternal(container, dataurl, loggingTag, ajaxErrorMsg, onEnd, onLoadSuccess, onLoadError, onScriptException, onBeforeContentLoad) {
+        if (onEnd === void 0) { onEnd = function (x) { }; }
+        if (onLoadSuccess === void 0) { onLoadSuccess = function (x) { }; }
+        if (onLoadError === void 0) { onLoadError = function (x) { }; }
+        if (onScriptException === void 0) { onScriptException = function (x) { }; }
+        if (onBeforeContentLoad === void 0) { onBeforeContentLoad = function () { }; }
+        var errorCallBack = function (reason, status) {
+            container.innerHTML = ajaxErrorMsg;
+            Log.Log("Error", loggingTag, "Ajax", false, "R", reason, "S", status.toString(), "U", dataurl);
+            onLoadError(container, reason, status);
+            onEnd && onEnd(container);
+        };
+        var successCallBack = function (html) {
+            onBeforeContentLoad();
+            container.innerHTML = html;
+            try {
+                executeScripts(container);
+                _w["rms"] && _w["rms"].start();
+                // set loading time stamp
+                data(container, loadingTimeStampName, "" + new Date().getTime());
+                onLoadSuccess(container);
+                onEnd && onEnd(container);
+            }
+            catch (e) {
+                Log.Log("Error", loggingTag, "ScriptException", false, "Tx", e.message, "U", dataurl);
+                onScriptException(container);
+                onEnd && onEnd(container);
+            }
+        };
+        AjaxRequestProcessor.SendRequest(dataurl, null, null, errorCallBack, successCallBack, 10000);
+    }
+    function executeScripts(container) {
+        var scriptElements = container.getElementsByTagName("script");
+        if (scriptElements) {
+            for (var i = 0; i < scriptElements.length; i++) {
+                var scriptElem = scriptElements[i];
+                insertScriptIntoHead(scriptElem);
+            }
+        }
+    }
+    function insertScriptIntoHead(script) {
+        if (!script) {
+            return;
+        }
+        var returnScript = sj_ce("script", "");
+        returnScript.type = "text/javascript";
+        if (script.src) {
+            returnScript.src = script.src;
+        }
+        else {
+            returnScript.innerHTML = script.innerHTML;
+        }
+        insertNodeIntoHead(returnScript);
+    }
+    function insertNodeIntoHead(node) {
+        _d.head.appendChild(node);
+    }
+})(AjaxDataLoader || (AjaxDataLoader = {}));

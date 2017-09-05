@@ -1,0 +1,1226 @@
+_w["EventsToDuplicate"] = [];
+;_w["useSharedLocalStorage"] = false;
+;///<amd-module name="shared" />
+///<reference path="..\Declarations\Shared.d.ts"/>
+define("shared", ["require", "exports"], function (require, exports) {
+    exports.__esModule = true;
+    var isIE = sb_ie;
+    function forEach(array, closure) {
+        var len = array.length;
+        for (var i = 0; i < len; i++) {
+            closure(array[i]);
+        }
+    }
+    exports.forEach = forEach;
+    function wrap(functionRef) {
+        var args = [];
+        for (var _i = 1; _i < arguments.length; _i++) {
+            args[_i - 1] = arguments[_i];
+        }
+        // Typescript automatically injects code that creates the args array using arguments.
+        // Hence there is no need to use the [].slice trick over here.
+        return function () {
+            functionRef.apply(null, args);
+        };
+    }
+    exports.wrap = wrap;
+    function preventDefault(evt) {
+        if (isIE && event) {
+            event.returnValue = false;
+        }
+        if (evt && typeof evt.preventDefault === "function") {
+            evt.preventDefault();
+        }
+    }
+    exports.preventDefault = preventDefault;
+    function stopPropagation(evt) {
+        if (isIE && event) {
+            event.cancelBubble = true;
+        }
+        if (evt && typeof evt.stopPropagation === "function") {
+            evt.stopPropagation();
+        }
+    }
+    exports.stopPropagation = stopPropagation;
+    function getOffset(element, leftOrTop, parentElement) {
+        var offset = 0;
+        while (element && element.offsetParent && element != (parentElement || document.body)) {
+            offset += element["offset" + leftOrTop];
+            element = element["offsetParent"];
+        }
+        return offset;
+    }
+    exports.getOffset = getOffset;
+    function getTime() {
+        return new Date().getTime();
+    }
+    exports.getTime = getTime;
+    /* Internal Functions only available for legacy purposes */
+    function getEvent(e) {
+        return isIE ? event : e;
+    }
+    function getEventTarget(e) {
+        return isIE ? (event ? event.srcElement : null) : e.target;
+    }
+    function getMouseInTarget(e) {
+        return isIE ? (event ? event.fromElement : null) : e.relatedTarget;
+    }
+    function getMouseOutTarget(e) {
+        return isIE ? (event ? event.toElement : null) : e.relatedTarget;
+    }
+    function withinElement(element, targetElement, parentElement) {
+        while (element && element != (parentElement || document.body)) {
+            if (element == targetElement)
+                return !0; // return true
+            element = element["parentNode"];
+        }
+        return !1; // return false
+    }
+    function changeLocation(url) {
+        window.location.href = url;
+    }
+    function setOpacity(elem, nOpacity) {
+        elem.style.filter = (nOpacity >= 100) ? "" : "alpha(opacity=" + nOpacity + ")";
+        elem.style.opacity = nOpacity / 100;
+    }
+    // Legacy Support
+    window["sj_b"] = document.body;
+    window["sb_de"] = document.documentElement;
+    window["sj_wf"] = wrap;
+    window["sj_pd"] = preventDefault;
+    window["sj_sp"] = stopPropagation;
+    window["sj_go"] = getOffset;
+    window["sj_ev"] = getEvent;
+    window["sj_et"] = getEventTarget;
+    window["sj_mi"] = getMouseInTarget;
+    window["sj_mo"] = getMouseOutTarget;
+    window["sj_we"] = withinElement;
+    window["sb_gt"] = getTime;
+    window["sj_so"] = setOpacity;
+    window["sj_lc"] = changeLocation;
+});
+;// Bug 860425 : Ajaxserp: Rewrite script in typescript once amd allows forking of file
+define('env', ["require", "exports", "shared"], function (require, exports, __shared__) {
+    var shared = __shared__;
+    var timeouts = [];
+    var intervals = [];
+    var realSetTimeout;
+    var realClearTimeout;
+    var realSetInterval;
+    var maxInternalStructureLength = 1024;
+    var timeoutIndex = 0;
+    var intervalIndex = 0;
+    function wrapFunctionCall(code, args) {
+        if (args.length && typeof code === "function") {
+            return function () { return code.apply(null, args); };
+        }
+        else {
+            return code;
+        }
+    }
+    realSetTimeout = window.setTimeout;
+    function setTimeout(code, delay) {
+        var args = [].slice.apply(arguments).slice(2);
+        var wrapped = wrapFunctionCall(code, args);
+        var timeout;
+        if (window.setImmediate && !window.setImmediate.Override && (!delay || delay <= 16)) {
+            timeout = 'i' + setImmediate(wrapped);
+        }
+        else {
+            timeout = realSetTimeout(wrapped, delay);
+        }
+        timeouts[timeoutIndex] = timeout;
+        timeoutIndex = (timeoutIndex + 1) % maxInternalStructureLength;
+        return timeout;
+    }
+    exports.setTimeout = setTimeout;
+    realSetInterval = window.setInterval;
+    function setInterval(code, delay) {
+        var args = [].slice.apply(arguments).slice(2);
+        var interval = realSetInterval(wrapFunctionCall(code, args), delay);
+        intervals[intervalIndex] = interval;
+        intervalIndex = (intervalIndex + 1) % maxInternalStructureLength;
+        return interval;
+    }
+    exports.setInterval = setInterval;
+    function clear() {
+        shared.forEach(timeouts, clearTimeout);
+        shared.forEach(intervals, window["clearInterval"]);
+        timeoutIndex = intervalIndex = intervals.length = timeouts.length = 0;
+    }
+    exports.clear = clear;
+    realClearTimeout = window.clearTimeout;
+    function clearTimeout(id) {
+        if (id == null) {
+            return;
+        }
+        if (typeof id === "string" && id.indexOf("i") === 0) {
+            window.clearImmediate(parseInt(id.substr(1), 10));
+        }
+        else {
+            realClearTimeout(id);
+        }
+    }
+    exports.clearTimeout = clearTimeout;
+    window["sb_rst"] = realSetTimeout;
+    window.setTimeout = window["sb_st"] = setTimeout;
+    window.setInterval = window["sb_si"] = setInterval;
+    window.clearTimeout = window["sb_ct"] = clearTimeout;
+});
+;///<reference path="..\Declarations\Shared.d.ts"/>
+// This and all calls to this namespace are stripped out at runtime by the JsMinifier under normal circumstances.
+// If you want to see your trace statements, use &dbgtrace=1.
+// If you want to see tracing in uncrunched script use &uncrunched=1&dbgtrace=1.
+// If you want to filter the console output by your sourceName(s) use &dbgtrace=mySourceName or &dbgtrace=mySourceName,anotherSourceName
+var DbgNoop;
+(function (DbgNoop) {
+    // Equivalent of console.log, but it lets you scope to certain sources and appends window.performance.now() for you.
+    function trace(sourceName, msg) {
+        var params = [];
+        for (var _i = 2; _i < arguments.length; _i++) {
+            params[_i - 2] = arguments[_i];
+        }
+        // noop
+    }
+    DbgNoop.trace = trace;
+    function warn(sourceName, msg) {
+        var params = [];
+        for (var _i = 2; _i < arguments.length; _i++) {
+            params[_i - 2] = arguments[_i];
+        }
+        // noop
+    }
+    DbgNoop.warn = warn;
+    function countAliveHandlers(handlers) {
+        // noop
+        return 0;
+    }
+    DbgNoop.countAliveHandlers = countAliveHandlers;
+})(DbgNoop || (DbgNoop = {}));
+window["dbg"] = DbgNoop;
+;///<amd-module name="event.custom" />
+///<reference path="..\Declarations\Shared.d.ts"/>
+define("event.custom", ["require", "exports"], function (require, exports) {
+    exports.__esModule = true;
+    var hash = {};
+    var onPPFired = false;
+    var eventsToFireAfterOnPP = [];
+    var persistentEventPrefix = "ajax.";
+    function register(id) {
+        // returns hash[id] if it is defined, or the result of hash[id] being intialized to an array (which is a reference to hash[id])
+        return (hash[id] || (hash[id] = []));
+    }
+    function fireHandler(handler, customEvent) {
+        // handler "d" property is the delay before calling handler
+        if (handler["d"]) {
+            setTimeout(function () { handler.apply(null, customEvent); }, handler["d"]);
+        }
+        else {
+            handler(customEvent);
+        }
+    }
+    function fireQueuedEventsAfterOnPP() {
+        var exceptionRaised;
+        dbg.trace("events", "event.custom fireQueuedEventsAfterOnPP replaying events because onPP fired");
+        for (var x = 0; x < eventsToFireAfterOnPP.length; x++) {
+            try {
+                fire.apply(null, eventsToFireAfterOnPP[x]);
+            }
+            catch (e) {
+                if (!exceptionRaised) {
+                    exceptionRaised = e;
+                }
+                dbg.warn("events", "event.custom fireQueuedEventsAfterOnPP exception throw for event: " + eventsToFireAfterOnPP[x], e);
+            }
+        }
+        eventsToFireAfterOnPP = [];
+        return exceptionRaised;
+    }
+    function reset(customEventsToPersist) {
+        dbg.trace("events", "event.custom reset");
+        for (var id in hash) {
+            if (!(id.indexOf(persistentEventPrefix) === 0) && !(customEventsToPersist != null && customEventsToPersist[id] != null)) {
+                delete hash[id];
+            }
+        }
+    }
+    exports.reset = reset;
+    // fire event
+    function fire(id) {
+        var args = [];
+        for (var _i = 1; _i < arguments.length; _i++) {
+            args[_i - 1] = arguments[_i];
+        }
+        if (id) {
+            if (id === "onPP") {
+                onPPFired = true;
+            }
+            else if (!onPPFired && window["fb_is"] == null) {
+                // This looks quite suspicious and it is.  The spirit of this change is to allow custom events to work before onPP fires when fallback is not on the page.  This is a valid scenario in the non-serp context.
+                dbg.trace("events", "event.custom fire onPPFired=false, fb_is is null, no longer hold events for this impression.");
+                onPPFired = true;
+            }
+            // register event in the event hash (if not already registered by bind)
+            var handlers = register(id);
+            // set an event property on the handler array that contains arguments passed to fire - used in "bind" for retroactively binding to an event
+            var customEvent = handlers["e"] = arguments;
+            var alreadyAddedDelayedFire = false;
+            var exceptionRaised;
+            dbg.trace("events", "event.custom fire id:" + id + " aliveHandlers: " + dbg.countAliveHandlers(handlers));
+            // call each handler passing the custom event object
+            for (var i = 0; i < handlers.length; i++) {
+                if (handlers[i].alive) {
+                    if (handlers[i].beforeOnPP || onPPFired) {
+                        try {
+                            fireHandler(handlers[i].func, customEvent);
+                        }
+                        catch (e) {
+                            if (!exceptionRaised) {
+                                exceptionRaised = e;
+                            }
+                            dbg.warn("events", "event.custom fire exception thrown for event: " + id, e);
+                        }
+                    }
+                    else if (!alreadyAddedDelayedFire) {
+                        dbg.trace("events", "event.custom fire onPP has not fired yet, so queing event id:" + id + " to be replayed after onPP.  If you do not want this behavior, pass true for beforeOnPP when you bind to the event.");
+                        eventsToFireAfterOnPP.push(arguments);
+                        alreadyAddedDelayedFire = true;
+                    }
+                }
+            }
+            // fire all the delayed events now that onPP has fired
+            if (id === "onPP") {
+                var ex = fireQueuedEventsAfterOnPP();
+                if (ex && !exceptionRaised) {
+                    exceptionRaised = ex;
+                }
+            }
+            // rethrow the first exception occurred executing the handlers
+            if (exceptionRaised) {
+                throw exceptionRaised;
+            }
+        }
+        else {
+            dbg.warn("events", "event.custom fire called with null/empty/undefined key");
+        }
+    }
+    exports.fire = fire;
+    // bind event
+    function bind(id, eventHandler, isRetro, delay, beforeOnPP) {
+        if (id) {
+            // register event in the global event hash (if not already registered by fire)
+            dbg.trace("events", "event.custom bind id:" + id + " retroactive:" + isRetro + " delay:" + delay + " beforeOnPP:" + beforeOnPP);
+            var handlers = register(id);
+            if (eventHandler) {
+                eventHandler["d"] = delay;
+                handlers.push({
+                    func: eventHandler,
+                    alive: true,
+                    beforeOnPP: beforeOnPP
+                });
+                // if binding is retroactive and the event has fired, call the handler immediately passing a reference to the last-fired event object
+                if (isRetro && handlers["e"] && (beforeOnPP || onPPFired)) {
+                    dbg.trace("events", "event.custom retroactive fire for eventHandler just bound id:" + id);
+                    fireHandler(eventHandler, handlers["e"]);
+                }
+            }
+        }
+        else {
+            dbg.warn("events", "event.custom bind called with null/empty/undefined key");
+        }
+    }
+    exports.bind = bind;
+    // unbind event
+    function unbind(id, eventHandler) {
+        var handlers = hash[id];
+        dbg.trace("events", "event.custom unbind id:" + id + " aliveHandlers: " + dbg.countAliveHandlers(handlers));
+        for (var i = 0; handlers && i < handlers.length; i++) {
+            if (handlers[i].func == eventHandler && handlers[i].alive) {
+                handlers[i].alive = false;
+                break;
+            }
+        }
+        dbg.trace("events", "event.custom after unbind id:" + id + " aliveHandlers: " + dbg.countAliveHandlers(handlers));
+    }
+    exports.unbind = unbind;
+    // Legacy Support
+    window["sj_evt"] = {
+        bind: bind,
+        unbind: unbind,
+        fire: fire
+    };
+    // This is needed to serve the function of fallback to injectScript during onPP
+    bind("onPP", function () {
+        if (window["fb_is"]) {
+            dbg.trace("events", "event.custom explicitly calling fallback.injectScript to load postloaded resources");
+            window["fb_is"]();
+        }
+    }, true);
+});
+;///<amd-module name="event.native" />
+define("event.native", ["require", "exports"], function (require, exports) {
+    exports.__esModule = true;
+    var custom = require("event.custom");
+    function bind(element, eventName, callback, isCapture) {
+        //console.log("native-bind: " + eventName);
+        var elementOk = (element === window || element === document || element === document.body);
+        if (element) {
+            // Divert some native bindings to custom events
+            if (elementOk && eventName == 'load') {
+                custom.bind("onP1", callback, true);
+            }
+            else if (elementOk && eventName == 'unload') {
+                custom.bind("unload", callback, true);
+            }
+            else if (element.addEventListener) {
+                element.addEventListener(eventName, callback, isCapture);
+            }
+            else if (element.attachEvent) {
+                element.attachEvent("on" + eventName, callback);
+            }
+            else {
+                element["on" + eventName] = callback;
+            }
+        }
+    }
+    exports.bind = bind;
+    function unbind(element, eventName, callback, isCapture) {
+        //console.log("native-unbind: " + eventName);
+        var elementOk = (element === window || element === document || element === document.body);
+        if (element) {
+            if (elementOk && eventName == 'load') {
+                custom.unbind("onP1", callback);
+            }
+            else if (elementOk && eventName == 'unload') {
+                custom.unbind("unload", callback);
+            }
+            else if (element.removeEventListener) {
+                element.removeEventListener(eventName, callback, isCapture);
+            }
+            else if (element.detachEvent) {
+                element.detachEvent("on" + eventName, callback);
+            }
+            else {
+                element["on" + eventName] = null;
+            }
+        }
+    }
+    exports.unbind = unbind;
+    // Legacy Support
+    window["sj_be"] = bind;
+    window["sj_ue"] = unbind;
+});
+;///<amd-module name="onHTML" />
+var customEvents = require("event.custom");
+customEvents.fire("onHTML");
+;///<amd-module name="dom" />
+///<reference path="..\Declarations\Shared.d.ts"/>
+define("dom", ["require", "exports"], function (require, exports) {
+    exports.__esModule = true;
+    var env = require("env");
+    var shared = require("shared");
+    var nativeEvents = require("event.native");
+    var customEvents = require("event.custom");
+    function loadJS(scriptName, isRenderedRemotely /*,[el, event]*/) {
+        // attach each element/event pair to load function
+        var args = arguments;
+        var el, evt;
+        var i = 2;
+        var script = { n: scriptName };
+        for (; i < args.length; i += 2) {
+            el = args[i];
+            evt = args[i + 1];
+            nativeEvents.bind(el, evt, shared.wrap(load, script, isRenderedRemotely, el, evt));
+        }
+        function load(script, isRenderedRemotely, elementBoundToLoad, eventBoundToLoad) {
+            // unbind event
+            elementBoundToLoad && nativeEvents.unbind(elementBoundToLoad, eventBoundToLoad, load);
+            // do not download any script until 5 ms after onP1 fires
+            customEvents.bind("onP1", function () {
+                if (!script.l) {
+                    // mark script as loaded so it won't get loaded again
+                    // this is necessary because we support attaching multiple events to trigger loading
+                    script.l = 1;
+                    // load script
+                    var scriptElement = createElement("script");
+                    scriptElement.setAttribute("data-rms", "1");
+                    scriptElement.src = (isRenderedRemotely ? "/fd/sa/" + _G.Ver : "/sa/" + _G.AppVer) + "/" + script.n + ".js";
+                    _d.body.appendChild(scriptElement);
+                }
+            }, true, 5);
+        }
+        // no element/event pairs passed, load immediately
+        i < 3 && load(script, isRenderedRemotely);
+    }
+    exports.loadJS = loadJS;
+    function getCssHolder() {
+        var cssHolder = _d.getElementById("ajaxStyles");
+        if (!cssHolder) {
+            cssHolder = _d.createElement("div");
+            cssHolder.id = "ajaxStyles";
+            _d.body.insertBefore(cssHolder, _d.body.firstChild);
+        }
+        return cssHolder;
+    }
+    exports.getCssHolder = getCssHolder;
+    function includeScript(scriptString) {
+        var script = createElement("script");
+        script["type"] = 'text/javascript';
+        script["text"] = scriptString;
+        script.setAttribute("data-bing-script", "1");
+        document.body.appendChild(script);
+        // Remove the script element from DOM after processing it
+        env.setTimeout(function () {
+            document.body.removeChild(script);
+        }, 0);
+    }
+    exports.includeScript = includeScript;
+    function includeScriptReference(scriptUrl) {
+        var script = createElement("script");
+        script["type"] = 'text/javascript';
+        script["src"] = scriptUrl;
+        // Remove the script element from DOM after processing it
+        script["onload"] = env.setTimeout(function () {
+            document.body.removeChild(script);
+        }, 0);
+        document.body.appendChild(script);
+    }
+    exports.includeScriptReference = includeScriptReference;
+    function includeCss(cssString) {
+        var style = getElementById("ajaxStyle");
+        if (!style) {
+            style = createElement("style");
+            style.setAttribute("data-rms", "1");
+            style.id = "ajaxStyle";
+            getCssHolder().appendChild(style);
+        }
+        if (style.textContent !== undefined) {
+            style.textContent += cssString;
+        }
+        else {
+            style["styleSheet"]["cssText"] += cssString;
+        }
+    }
+    exports.includeCss = includeCss;
+    /* Internal Methods for Legacy Support */
+    function getElementById(id) {
+        return _d.getElementById(id);
+    }
+    function createElement(tagName, id, className) {
+        var element = _d.createElement(tagName);
+        if (id)
+            element.id = id;
+        if (className)
+            element.className = className;
+        return element;
+    }
+    _w["_ge"] = getElementById;
+    _w["sj_ce"] = createElement;
+    _w["sj_jb"] = loadJS;
+    _w["sj_ic"] = includeCss;
+});
+;///<amd-module name="cookies" />
+///<reference path="..\Declarations\Shared.d.ts"/>
+define("cookies", ["require", "exports"], function (require, exports) {
+    exports.__esModule = true;
+    var cookieAccessDenied = false;
+    var expiredDateString = new Date(0).toGMTString();
+    try {
+        var cookie = _d.cookie;
+    }
+    catch (e) {
+        cookieAccessDenied = true;
+    }
+    function cookieDomain() {
+        var domain = location.hostname.match(/([^.]+\.[^.]*)$/);
+        return domain ? ";domain=" + domain[0] : "";
+    }
+    function setCookie(newCookie, isPersistent, path, expires) {
+        var domain = cookieDomain();
+        var validPeriod = (expires && expires > 0) ? expires * 60000 : 63072000000 /*2 years*/;
+        var expireDate = new Date(new Date().getTime() + Math.min(validPeriod, 63072000000));
+        _d.cookie = newCookie + domain +
+            (isPersistent ? ";expires=" + expireDate.toGMTString() : "") +
+            (path ? ";path=" + path : "");
+    }
+    function setNoCrumbs(cookieName, cookieValue, isPersistent, path, expires) {
+        if (!cookieAccessDenied) {
+            var newCookie = cookieName + "=" + cookieValue;
+            setCookie(newCookie, isPersistent, path, expires);
+        }
+    }
+    exports.setNoCrumbs = setNoCrumbs;
+    function areCookiesAccessible() {
+        return !cookieAccessDenied;
+    }
+    exports.areCookiesAccessible = areCookiesAccessible;
+    function get(cookieName, crumbName) {
+        if (cookieAccessDenied) {
+            return null;
+        }
+        var cookieMatch = _d.cookie.match(new RegExp("\\b" + cookieName + "=[^;]+"));
+        if (crumbName && cookieMatch) {
+            var crumbMatch = cookieMatch[0].match(new RegExp("\\b" + crumbName + "=([^&]*)"));
+            return crumbMatch ? crumbMatch[1] : null;
+        }
+        return cookieMatch ? cookieMatch[0] : null;
+    }
+    exports.get = get;
+    function set(cookieName, crumbName, crumbValue, isPersistent, path, expires) {
+        if (!cookieAccessDenied) {
+            var newCookie;
+            var newCrumb = crumbName + "=" + crumbValue;
+            var cookieString = get(cookieName);
+            if (cookieString) {
+                var oldCrumbValue = get(cookieName, crumbName);
+                newCookie = (oldCrumbValue ?
+                    cookieString.replace(crumbName + "=" + oldCrumbValue, newCrumb) // crumb already exists, replace crumb
+                    : cookieString + "&" + newCrumb); // crumb doesnt exist add the crumb
+            }
+            else {
+                newCookie = cookieName + "=" + newCrumb;
+            }
+            setCookie(newCookie, isPersistent, path, expires);
+        }
+    }
+    exports.set = set;
+    function clear(cookieName, path) {
+        if (!cookieAccessDenied) {
+            var newCookie = cookieName + '=';
+            var domain = cookieDomain();
+            _d.cookie = newCookie + domain + ";expires=" + expiredDateString + (path ? ";path=" + path : "");
+        }
+    }
+    exports.clear = clear;
+    // Legacy Support
+    _w["sj_cook"] = { get: get, set: set, setNoCrumbs: setNoCrumbs, clear: clear, areCookiesAccessible: areCookiesAccessible };
+});
+;define("rmsajax", ["require", "exports"], function (require, exports) {
+    exports.__esModule = true;
+    ///<amd-module name="rmsajax" />
+    var customEvent = require("event.custom");
+    var slice = [].slice;
+    // States that a resource can be in
+    var PREFETCHING = 1, PREFETCHED = 2, LOADING = 3, LOADED = 4;
+    var currentRun = 0;
+    //Prefix used to register resources as app resources
+    var AppResourcePrefix = "A:";
+    //Deferred content container ID
+    var FDDeferContainerID = "fRmsDefer";
+    var APPDeferContainerID = "aRmsDefer";
+    // Holds all the script and style objects to be post-loaded
+    var scripts = {};
+    var styles = {};
+    // Holds the list of callbacks to be executed after ALL resources have been downloaded
+    var callbacks = [];
+    // Holds the list of JavaScript and css requests
+    var jsRequests = [];
+    var cssRequests = [];
+    var toString = Object.prototype.toString;
+    var _d = document;
+    // Edge useragent regular expression
+    var edgeRegex = /edge/i;
+    // The onload function is used to register a callback function for a given list of css or js keys
+    //      E.g. rms.onload(["jsKey1", "jsKey2"], ["cssKey1", "cssKey2"], function () { alert("done"); });
+    // The function also supports registering a callback function to be executed
+    // when ALL the resources have been loaded
+    //      E.g. rms.onload(function () { alert("All Done"); });
+    function onload() {
+        var args = [];
+        for (var _i = 0; _i < arguments.length; _i++) {
+            args[_i] = arguments[_i];
+        }
+        if (args.length == 0) {
+            return;
+        }
+        var callback = args[args.length - 1];
+        if (args.length == 1) {
+            // Global callback
+            if (isFunction(callback)) {
+                callbacks.push(callback);
+            }
+        }
+        else if (args.length == 3) {
+            var jsKeys = args[0];
+            var cssKeys = args[1];
+            var cb = args[2];
+            if (isArray(jsKeys) && isArray(cssKeys) && isFunction(cb)) {
+                registerResources(scripts, jsKeys, cb);
+                registerResources(styles, cssKeys, cb);
+            }
+        }
+        return window["rms"];
+    }
+    exports.onload = onload;
+    // This function is used to register one or more javascript resources for post-onload
+    // For e.g. _w.rms.js({ "key1": "http://www.bing.com/Shared.js" }, { "key2": "http://www.bing.com/fd/sa/PostContent.js" });
+    function js() {
+        var args = arguments;
+        jsRequests.push(args);
+        for (var i = 0; i < args.length; i++) {
+            var resource = args[i];
+            registerResourceObj(resource, scripts);
+            // if resource is on demand then load instantly and fetch without prefetching
+            if (resource.d) {
+                loadScript.call(null, resource);
+            }
+        }
+        return window["rms"];
+    }
+    exports.js = js;
+    // This function is used to register one or more css resources for post-onload
+    function css() {
+        var args = arguments;
+        cssRequests.push(args);
+        for (var i = 0; i < args.length; i++) {
+            registerResourceObj(args[i], styles);
+        }
+        return window["rms"];
+    }
+    exports.css = css;
+    // This function instructs RMS to start downloading the post-onload resources
+    function start() {
+        // Adds global callbacks to every resource registered with the system
+        wireUpGlobalCallbacks();
+        var isLoadingResource = false;
+        for (var i = 0; i < jsRequests.length; i++) {
+            isLoadingResource = loadScript.apply(null, slice.call(jsRequests[i], 0)) || isLoadingResource;
+        }
+        for (var j = 0; j < cssRequests.length; j++) {
+            isLoadingResource = loadCss.apply(null, slice.call(cssRequests[j], 0)) || isLoadingResource;
+        }
+        if (!isLoadingResource) {
+            for (var i = 0; i < callbacks.length; i++) {
+                callbacks[i]();
+            }
+        }
+    }
+    exports.start = start;
+    // Loads a script
+    function loadScript() {
+        var args = arguments;
+        if (args.length === 0) {
+            return false;
+        }
+        var firstScript = scripts[getKeyFromScriptObject(args[0])];
+        if (args.length > 1) {
+            // download the scripts without executing
+            var scriptsToPrefetch = getScripts.apply(null, args);
+            for (var i = 0; i < scriptsToPrefetch.length; i++) {
+                var script = scriptsToPrefetch[i];
+                script.run = currentRun;
+                prefetch(script, function (s) {
+                    return function () {
+                        onPrefetchScriptCompleted(s, scriptsToPrefetch);
+                    };
+                }(script));
+            }
+        }
+        else {
+            firstScript.run = currentRun;
+            fetchScript(firstScript, function () { onFetchScriptCompleted(firstScript); });
+        }
+        return true;
+    }
+    // Downloads a resource without executing it
+    function prefetch(resource, callback) {
+        if (resource.state) {
+            return;
+        }
+        resource.state = PREFETCHING;
+        if (isInline(resource)) {
+            callback();
+            return;
+        }
+        /* If IsIE, use image tags prefetch the javascript.
+        
+           window["ActiveXObject"] !== undefined check can be used to detect all versions of IE until IE11
+           For IE12, this check no longer works and we need to explicitly check user agent.
+           
+           Example Edge useragent: (https://msdn.microsoft.com/en-us/library/hh869301(v=vs.85).aspx)
+           Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2311.135 Safari/537.36 Edge/12.<OS build number>
+        */
+        if (window["ActiveXObject"] !== undefined || edgeRegex.test(navigator.userAgent)) {
+            // If IE use the image tags
+            var image = new Image();
+            image.onload = callback;
+            image.onerror = callback;
+            image.src = resource.url;
+        }
+        else {
+            var xmlhttp = new XMLHttpRequest();
+            xmlhttp.open("GET", resource.url, true);
+            xmlhttp.onreadystatechange = function () {
+                if (xmlhttp.readyState == 4) {
+                    callback();
+                }
+            };
+            xmlhttp.send();
+        }
+    }
+    function onPrefetchScriptCompleted(script, scriptList) {
+        if (script.run != currentRun) {
+            return;
+        }
+        script.state = PREFETCHED;
+        loadNextScripts(scriptList);
+    }
+    function callFetchScriptClosure(script, scriptList) {
+        if (script.run != currentRun) {
+            return;
+        }
+        fetchScript(script, function (res) {
+            return function () { onFetchScriptCompleted(res, scriptList); };
+        }(script));
+    }
+    function onFetchScriptCompleted(script, scriptList) {
+        if (script.run != currentRun) {
+            return;
+        }
+        script.state = LOADED;
+        invokeCallbacks(script);
+        if (!scriptList) {
+            return;
+        }
+        loadNextScripts(scriptList);
+    }
+    function loadNextScripts(scriptList) {
+        for (var i = 0; i < scriptList.length; i++) {
+            var s = scriptList[i];
+            switch (s.state) {
+                case PREFETCHED:
+                    {
+                        callFetchScriptClosure(s, scriptList);
+                        return;
+                    }
+                case LOADED:
+                    {
+                        continue;
+                    }
+            }
+            return;
+        }
+    }
+    function getKeyFromScriptObject(obj) {
+        for (var key in obj) {
+            return key;
+        }
+    }
+    function loadCss() {
+        // TODO
+        return false;
+    }
+    // Invokes all the event handlers registered for a given resource
+    function invokeCallbacks(resource) {
+        for (var i = 0; i < resource.callbacks.length; i++) {
+            resource.callbacks[i].dec();
+        }
+    }
+    // Creates a script tag and attaches it to the body
+    function fetchScript(script, callback) {
+        if (script.state == LOADING || script.state == LOADED) {
+            return;
+        }
+        script.state = LOADING;
+        var scriptTag = _d.createElement('SCRIPT');
+        scriptTag["type"] = 'text/javascript';
+        scriptTag.setAttribute("data-rms", "1");
+        scriptTag["onreadystatechange"] = scriptTag.onload = function () {
+            var state = scriptTag["readyState"];
+            if (!state || /loaded|complete/.test(state)) {
+                processCallback(callback);
+            }
+        };
+        if (!isInline(script)) {
+            scriptTag["src"] = script.url;
+            _d.body.appendChild(scriptTag);
+            // The onreadystate change event will process the callback
+        }
+        else {
+            var containerId = script.app ? APPDeferContainerID : FDDeferContainerID, div, childNodes;
+            if ((div = _d.getElementById(containerId)) && (childNodes = div.childNodes) && childNodes[script.pos]) {
+                var textString = childNodes[script.pos]["innerHTML"];
+                if (textString !== "") {
+                    // The html comment portion needs to be stripped of this text content
+                    var htmlCommentStartLen = 4;
+                    var htmlCommentEndLen = 3;
+                    var textLen = textString.length;
+                    var prefixText = textString.substring(0, htmlCommentStartLen);
+                    var suffixText = textString.substring((textLen - htmlCommentEndLen), textLen);
+                    if (prefixText == "<!--" && suffixText == "-->") {
+                        textString = textString.substring(htmlCommentStartLen, textLen - htmlCommentEndLen);
+                    }
+                    scriptTag["text"] = textString;
+                    _d.body.appendChild(scriptTag);
+                }
+            }
+            // For inline scripts, do not rely on onreadystate change to fire (Does not work in chrome and safari)
+            // Since script execution is synchronous, call the callback state here.
+            processCallback(callback);
+        }
+    }
+    function processCallback(callback) {
+        if (!callback.done) {
+            callback.done = true;
+            callback();
+        }
+    }
+    // Represents a callback object that monitors itself as all its dependencies are downloaded and executed
+    // When the counts reach 0 for all dependencies, the callback executes itself
+    var callbackObj = function (cb) {
+        var count = 0;
+        var done = false;
+        this.inc = function () {
+            !done && count++;
+        };
+        this.dec = function () {
+            if (!done) {
+                count--;
+                if (count == 0) {
+                    done = true;
+                    cb();
+                }
+            }
+        };
+    };
+    function isFunction(obj) {
+        return toString.call(obj) == '[object Function]';
+    }
+    function isArray(obj) {
+        return toString.call(obj) == '[object Array]';
+    }
+    function registerResources(resources, keys, callback) {
+        var resourceColl = [];
+        var cbObj = new callbackObj(callback);
+        for (var i = 0; i < keys.length; i++) {
+            var resource = resources[keys[i]];
+            if (!resource) {
+                resource = register(resources, keys[i]);
+            }
+            registerCallbackWithResource(resource, cbObj);
+        }
+    }
+    function wireUpGlobalCallbacks() {
+        for (var i = 0; i < callbacks.length; i++) {
+            var cbObj = new callbackObj(callbacks[i]);
+            for (var script in scripts) {
+                registerCallbackWithResource(scripts[script], cbObj);
+            }
+            for (var style in styles) {
+                registerCallbackWithResource(styles[style], cbObj);
+            }
+        }
+    }
+    function registerCallbackWithResource(resource, cbObj) {
+        resource.callbacks.push(cbObj);
+        cbObj.inc();
+    }
+    function registerResourceObj(obj, resources) {
+        for (var key in obj) {
+            if (typeof (obj[key]) != undefined) {
+                return register(resources, key, obj[key]);
+            }
+        }
+    }
+    function register(resources, key, loc) {
+        if (!resources[key]) {
+            resources[key] = { "callbacks": [], "onPrefetch": [] };
+            resources[key].key = key;
+        }
+        //Check for application prefix
+        if (key.indexOf(AppResourcePrefix) == 0) {
+            resources[key].app = true;
+        }
+        if (!isNaN(loc)) {
+            // if loc is a number, this is an inline resource
+            resources[key].pos = loc;
+        }
+        else {
+            // Its not a number so, url
+            resources[key].url = loc;
+        }
+        return resources[key];
+    }
+    function getScripts() {
+        var scriptList = [];
+        for (var i = 0; i < arguments.length; i++) {
+            var key = getKeyFromScriptObject(arguments[i]);
+            scriptList.push(scripts[key]);
+        }
+        return scriptList;
+    }
+    function isInline(resource) {
+        return !resource.url;
+    }
+    function reset() {
+        scripts = {};
+        styles = {};
+        callbacks = [];
+        jsRequests = [];
+        cssRequests = [];
+        currentRun += 1;
+        // Remove placeholders so we can start fresh
+        var fdContainer = document.getElementById(FDDeferContainerID);
+        if (fdContainer)
+            fdContainer.parentNode.removeChild(fdContainer);
+        var appContainer = document.getElementById(APPDeferContainerID);
+        if (appContainer)
+            appContainer.parentNode.removeChild(appContainer);
+        wireup();
+    }
+    exports.reset = reset;
+    function wireup() {
+        customEvent.bind("onP1Lazy", function () {
+            onload(function () { customEvent.fire("onP1"); });
+            start();
+        }, true // Bind retroactively -- will fire even if "OnP1Lazy" has been fired before this call
+        );
+    }
+    wireup();
+    //Legacy support
+    window["rms"] = { onload: onload, js: js, start: start };
+});
+;/// <reference path="..\..\Declarations\Shared.d.ts"/>
+_w["LogUploadCapFeatureEnabled"] = false;
+;/// <reference path="..\..\Declarations\Shared.d.ts"/>
+_w["InstLogQueueKeyFetcher"] = {
+    Get: function (path) {
+        // For old build of windows 10, keeping existing logic of splitting EventLong queue
+        var queueKeyPrefix = "eventLogQueue";
+        var queueKey;
+        if (path.indexOf("proactive") == 1 || path.indexOf("search") == 1 || path.indexOf("zinc") == 1) {
+            queueKey = queueKeyPrefix + "_Online";
+        }
+        else {
+            queueKey = queueKeyPrefix + "_Offline";
+        }
+        return queueKey;
+    },
+    GetSharedLocation: function () {
+        return "eventLogQueue_Shared";
+    },
+    CanUploadSharedMessages: function (path) {
+        if (_w["useSharedLocalStorage"] && path.indexOf("AS/API") === 1) {
+            return true;
+        }
+        else {
+            return false;
+        }
+    }
+};
+;///<amd-module name="clientinst" />
+define("clientinst", ["require", "exports"], function (require, exports) {
+    exports.__esModule = true;
+    var env = require("env");
+    var nativeEvents = require("event.native");
+    var customEvents = require("event.custom");
+    var shared = require("shared");
+    // assign escape function to a var so each occurrence is crunched
+    var _encode = encodeURIComponent;
+    // assign dot-notated property and function names to vars so they are crunched
+    var _length = "length";
+    var _apply = "apply";
+    var _replaceRegex = /"/g;
+    // Value can have already encoded json object. For example '"test"', '[1,2,3]' or '{x:1}'.
+    // We also need to take into account leading whitespaces
+    var _jsonDataRegex = /^\s*[{\["].*["}\]]\s*$/g;
+    var FLUSH_INTERVAL = 2000; //flush the event buffer every 2-seconds
+    // FD supports only 2k URLs. Max path on IE7 is 2048. But we should decrease it to 2000
+    // to account for last appended data ( ] {}, )
+    var MAX_URL_LENGTH = 2000;
+    var _isInitialized = 0;
+    var _flushTimeout;
+    var _logHost = "";
+    var _logPath = _G.lsUrl + "&TYPE=Event.ClientInst&DATA=";
+    var _hostname = location.hostname;
+    var _domain = _hostname.match(/([^.]+\.[^.]*)$/);
+    if (_domain) {
+        var _protocol = location.protocol;
+        // replacing harcoded "www" with substring of the domain to fix calls for www2.bing.com and www4.bing.com
+        var _subdomain = _protocol == "https:" ? _hostname.substring(0, _hostname.indexOf(".")) : "a4";
+        _logHost = _protocol + "//" + _subdomain + "." + _domain[0];
+    }
+    var _flushQueue = {};
+    var _createImage = function () { return new Image(); };
+    //Log.Log
+    //
+    //arguments:
+    //      eventType           the unique string identifier established for a given client event type
+    //      eventID             the K-value, if availalble, otherwise a string that is the feature id
+    //      name                todo
+    //      forceFlush          if true, the buffer is immediatedly flushed after adding event data
+    //      key/value pairs     (optional) the key must be a string while the value can be scalar or object
+    function Log(eventType, eventID, name, forceFlush /*,[key, value]*/) {
+        ///#DEBUG
+        // testhook for validating the request
+        _createImage = Log["createImage"] || _createImage;
+        ///#ENDDEBUG
+        if (!_isInitialized) {
+            // log the loading of client instrumentation code so we have a base timestamp to match events with a given page view
+            doLog("Init", "CI", "Base", false);
+            // flush the event buffer FLUSH_INTERVAL ms after first log call
+            _flushTimeout = env.setTimeout(flush, FLUSH_INTERVAL);
+            _isInitialized = 1;
+            // bind to onbeforeunload to attempt to flush any events remaining in the buffer
+            nativeEvents.bind(window, "beforeunload", flush, false);
+            // bind to unload to flush the buffer before getting a new impression id from ajaxserp
+            customEvents.bind("unload", function () { resetAndFlush(); }, false);
+        }
+        doLog(eventType, eventID, name, forceFlush, [].slice.apply(arguments).slice(4)); // 4 required args
+    }
+    exports.Log = Log;
+    function doLog(eventType, eventID, eventName, forceFlush, aKeyValPairs) {
+        // start building string for new data
+        var newData = '';
+        var impressionGuid = _G.IG;
+        // add name, value pairs if passed
+        if (aKeyValPairs) {
+            for (var i = 0; i < aKeyValPairs.length; i += 2) {
+                var name = aKeyValPairs[i];
+                var value = aKeyValPairs[i + 1];
+                if (name == "ImpressionGuid") {
+                    impressionGuid = value;
+                    continue;
+                }
+                // put quotes around all non-compound values or unquoted strings
+                if (typeof name != "string" || name.indexOf('"') < 0) {
+                    name = '"' + name + '"';
+                }
+                if (typeof value == "string" && !value.match(_jsonDataRegex)) {
+                    value = '"' + value.replace(_replaceRegex, '\\"') + '"';
+                }
+                newData += name + ":" + value + ",";
+            }
+        }
+        // add event type - "T" is reserved: add at the end of the object defintion to make sure we override anyone who dares to use
+        // add k-value or fid (feature id) - "K" and "FID" are also reserved
+        // add name - "Name" is also reserved
+        // add timestamp - "TS" is also reserved
+        newData += ('"T":"CI.' + eventType +
+            '",' + (typeof eventID == "number" ? '"K":' + eventID : '"FID":"' + eventID + '"') +
+            ',"Name":"' + eventName +
+            '","TS":' + shared.getTime());
+        // we need to encode these values so we can track of url length. Characters like , have to be escaped too.
+        newData = _encode("{" + newData + "}");
+        var currentData = _flushQueue[impressionGuid] || "";
+        // will adding new data take us over the max buffer size?
+        if (_logPath[_length] + currentData[_length] + newData[_length] >= MAX_URL_LENGTH) {
+            // yes - flush before proceeding
+            flush();
+            // clean local variable
+            currentData = "";
+        }
+        // add the new data to the flush queue
+        _flushQueue[impressionGuid] = currentData + _encode(currentData ? "," : "") + newData;
+        // force flush passed?
+        if (forceFlush) {
+            // immediately flush the buffer instead of waiting for next scheduled flush/page-unload
+            flush();
+        }
+    }
+    //Log.Wrap
+    //
+    //arguments:
+    //      scope - the scope in which the target function exists
+    //      functionName - the name of the function to wrapped
+    //      logFunction - the log function to call back to
+    //      bLogBeforeCall - (optional) determines if the target function should be called before the log function
+    function Wrap(scope, functionName, logFunction, bLogBeforeCall) {
+        var original = scope[functionName];
+        scope[functionName] =
+            function () {
+                // note that "arguments" is the collection of args passed to this inner function - not the arguments passed to wrapFunction
+                var _arguments = arguments;
+                if (bLogBeforeCall) {
+                    // call log function passing the same arguments that were passed to the target functon
+                    logFunction[_apply](this, _arguments);
+                }
+                // call the target function and grab the return so it can be passed back to the caller
+                var ret = original[_apply](this, _arguments);
+                if (!bLogBeforeCall) {
+                    // call log function passing the same arguments that were passed to the target functon, plus the return from the call to original function
+                    var args = [];
+                    for (var x = 0; x < _arguments.length; x++)
+                        args.push(_arguments[x]);
+                    args.push(ret);
+                    logFunction[_apply](this, args);
+                }
+                // pass back return of the target function to the caller
+                return ret;
+            };
+    }
+    exports.Wrap = Wrap;
+    function resetAndFlush() {
+        _isInitialized = 0;
+        flush();
+    }
+    function flush() {
+        if (_flushTimeout)
+            clearTimeout(_flushTimeout);
+        for (var guid in _flushQueue) {
+            if (_flushQueue.hasOwnProperty(guid)) {
+                var lsUrl = guid != _G.IG ? _G.lsUrl.replace(_G.IG, guid) : _G.lsUrl;
+                _createImage().src = _logHost + lsUrl + "&TYPE=Event.ClientInst&DATA=" + _encode("[") + _flushQueue[guid] + _encode("]");
+                delete _flushQueue[guid];
+            }
+        }
+        _flushTimeout = env.setTimeout(flush, FLUSH_INTERVAL);
+    }
+    window["Log"] = { Log: Log, Wrap: Wrap };
+});
+;///<amd-module name="replay" />
+var fallbackReplay = require("fallback");
+fallbackReplay.replay();
+;var sj_anim = function (updateFunc) {
+    // const
+    var _intervalValue = 25; // millisecond
+    var _self = this;
+    var _el, _interval, _beginTime, _endTime, _firstStep, _lastStep, _stepSize, _currentStep, _callback;
+    _self.init = function (el, firstStep, lastStep, stepSize, callback) {
+        _el = el;
+        _firstStep = firstStep;
+        _lastStep = lastStep;
+        _stepSize = stepSize;
+        _callback = callback;
+        if (stepSize == 0) {
+            _endTime = _beginTime;
+            _callback && _callback();
+            return;
+        }
+        if (!_currentStep)
+            _currentStep = _firstStep;
+        !_interval && _self.start();
+    };
+    _self.start = function () {
+        _beginTime = sb_gt();
+        _endTime = Math.abs(_lastStep - _currentStep) / _stepSize * _intervalValue;
+        _interval = setInterval(_self.next, _intervalValue);
+    };
+    _self.stop = function () {
+        clearInterval(_interval);
+        _interval = 0;
+    };
+    _self.next = function () {
+        var timeExpired = sb_gt() - _beginTime;
+        var animationComplete = timeExpired >= _endTime;
+        _currentStep = _firstStep + ((_lastStep - _firstStep) * timeExpired / _endTime);
+        if (animationComplete) {
+            _self.stop();
+            _currentStep = _lastStep;
+        }
+        updateFunc(_el, _currentStep);
+        animationComplete && _callback && _callback();
+    };
+    _self.getInterval = function () {
+        return _intervalValue;
+    };
+};
+;var sj_fader = function () {
+    return new sj_anim(function (el, step) {
+        sj_so(el, step);
+    });
+};
+;///<amd-module name="framework" />
+var customEvents = require("event.custom");
+customEvents.bind("onPP", function () { customEvents.fire("onP1Lazy"); }, true);
+;

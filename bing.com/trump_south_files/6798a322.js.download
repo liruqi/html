@@ -1,0 +1,41 @@
+/* Orientation */
+///<reference path="declarations\Shared.d.ts" />
+var Orientation;
+(function (Orientation) {
+    var isMediaQuerySupported = "matchMedia" in _w;
+    var isOrientationEventSupported = "onorientationchange" in _w;
+    var isResizeEventSupported = "onresize" in _w;
+    var orientationEventName = isOrientationEventSupported ? "orientationchange" : "resize";
+    function onOrientation(handler) {
+        // TFS #5322733: remove lastInnerWidth and multiple event listeners
+        var lastInnerWidth = _w.innerWidth;
+        // Note: windows phone Edge 10135 supports media query, but doesn't fire orientationchange/resize events correctly
+        if (isMediaQuerySupported) {
+            var mql = window.matchMedia("(orientation: portrait)");
+            mql.addListener(function (m) {
+                if (_w.innerWidth != lastInnerWidth) {
+                    lastInnerWidth = _w.innerWidth;
+                    handler(!m.matches);
+                }
+            });
+        }
+        // TFS #5322733: should add "isResizeEventSupported"
+        if (isOrientationEventSupported) {
+            sj_be(_w, orientationEventName, function (evt) {
+                if (_w.innerWidth != lastInnerWidth) {
+                    lastInnerWidth = _w.innerWidth;
+                    handler(_w.innerWidth > _w.innerHeight);
+                }
+            });
+        }
+        if (!isMediaQuerySupported && !isOrientationEventSupported && !isResizeEventSupported) {
+            sb_si(function () {
+                if (_w.innerWidth != lastInnerWidth) {
+                    lastInnerWidth = _w.innerWidth;
+                    handler(_w.innerWidth > _w.innerHeight);
+                }
+            }, 1000);
+        }
+    }
+    Orientation.onOrientation = onOrientation;
+})(Orientation || (Orientation = {}));

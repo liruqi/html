@@ -1,0 +1,193 @@
+///<reference path="..\..\..\..\Shared\Content\Content\Script\Declarations\Shared.d.ts"/>
+// <reference path="SerpKeyboardNavigation_Selector.d.ts" />
+var SerpKeyboardNavigation;
+(function (SerpKeyboardNavigation) {
+    var activeElement; // Tracks the currently selected item
+    var selectableElements; // Filled at P1.  Contains a list of all selectable items
+    var currentlySelectedIndex = -1; // Currently selected index.  Only valid when orderBroken = false
+    var orderBroken = false; // Tells if the order has been broken with other focus events like tab.  If this is true, 
+    // indexes must be re-computed
+    var keyboardNavId = "kn_a"; // Identifier for keyboard navigation element
+    var arrowParentElement; // Parent of the arrow element, used for positioning
+    var arrowElement; // Element that contains our arrow
+    var firstTabEvent = true; // Used for logging purposes, log on very first tab for triggered scorecard
+    var initiallyFocusedItem; // Set on page load.  We use this to determine if focus has changed from its initial state from some external routine (Click or other JS)
+    var KeyPressType;
+    (function (KeyPressType) {
+        KeyPressType[KeyPressType["Up"] = 38] = "Up";
+        KeyPressType[KeyPressType["Down"] = 40] = "Down";
+        KeyPressType[KeyPressType["Tab"] = 9] = "Tab";
+        KeyPressType[KeyPressType["Enter"] = 13] = "Enter";
+    })(KeyPressType || (KeyPressType = {}));
+    ;
+    // Initialize on first load.  Also called on ajax.load, so reset the state in that case
+    function initialize() {
+        initiallyFocusedItem = _d.activeElement; // This seems to be _d.body everytime.  But setting just in case default changes
+        activeElement = null;
+        selectableElements = null;
+        orderBroken = false;
+        currentlySelectedIndex = -1;
+        createArrowElement();
+        selectableElements = _w["NavSelector"] && NavSelector(false);
+    }
+    // If the user clicks on something, remove our arrow, and reset our active element (Return to initial state)
+    function onmousedown(e) {
+        removeExistingSpans();
+        activeElement = null;
+    }
+    // Main function for Handling a keyboard navigation, called on every keydown event
+    function keyboardNavigation(e) {
+        if (e) {
+            if (e.keyCode == KeyPressType.Tab && firstTabEvent) {
+                log("TOP");
+                firstTabEvent = false;
+            }
+            var active = _d.activeElement;
+            // Disable our experince in error cases, or if the searchbox has focus
+            if (selectableElements && active && active.className !== "b_searchbox") {
+                if (e.keyCode == KeyPressType.Enter) {
+                    // If the user hits the enter key, and it's not on an algo link, treat the same as a click.
+                    // Reset our active element, and return to our default state.
+                    activeElement = null;
+                    // For instrumentation, EN = Enter On Nothing, EE = Enter On Element
+                    log(currentlySelectedIndex == -1 ? "EN" : "EE", currentlySelectedIndex);
+                }
+                else if (ShouldHandle(e)) {
+                    var nextIndex = computeNextFocusedIndex(e.keyCode);
+                    if (nextIndex !== -1 && nextIndex !== currentlySelectedIndex) {
+                        setActiveElement(nextIndex);
+                        sj_pd(e);
+                    }
+                }
+            }
+        }
+    }
+    function log(action, index) {
+        sj_log("CI.SerpKeyboardNav", action, index ? index.toString() : "");
+    }
+    // We don't want to handle events if focus has changed outside of our routine.
+    // This can happen if someone clicks on a control, or some other JS sets focus, like in a popup
+    // It is very jarring for the user to click on an element, and have focus jump to the algo
+    // on their next tab press
+    function ShouldHandle(e) {
+        if (!activeElement && initiallyFocusedItem != _d.activeElement) {
+            return false;
+        }
+        else if (e.altKey || e.ctrlKey) {
+            // We shouldn't do anything if a modifier key is held down.  Some modifier combinations
+            // already have existing functionality, and since we don't know what all combinations might do in 
+            // all situations, just don't handle them with custom serp keyboard nav
+            return false;
+        }
+        else {
+            return true;
+        }
+    }
+    function computeNextFocusedIndex(keyCode) {
+        if (keyCode === KeyPressType.Tab) {
+            return computeNextFocusedIndexFromTab();
+        }
+        else if (keyCode === KeyPressType.Down || keyCode === KeyPressType.Up) {
+            if (document.activeElement && document.activeElement.tagName.toLowerCase() === "select") {
+                // If the user is arrowing through a dropdown, let them do it.  Don't intercept the arrow keys.
+                // NOTE: In non-microsoft browsers (safari, chrome, ff), the Select element eats the arrow key events 
+                // so they never bubble to my control (which seems correct).  But IE / Edge still bubble the event up ( seems like a bug in IE )
+                return -1;
+            }
+            return computeNextFocusedIndexFromArrow(keyCode === KeyPressType.Down);
+        }
+        else {
+            return -1;
+        }
+    }
+    // There are two unique cases with respect to the Tab key.
+    // 1.  The first time the user hits tab, they enter into our experience. In this case
+    //       just set the focus to the top element
+    // 2.  Once they are in our experience already, hitting tab exists the experience, and
+    //     just sets the standard browser focus.  In this case, remove all existing 
+    //       arrows, and indicate that the order is broken  
+    function computeNextFocusedIndexFromTab() {
+        var nextIndex = -1;
+        if (activeElement) {
+            removeExistingSpans();
+            orderBroken = true;
+            currentlySelectedIndex = -1;
+            log("TO"); //TO = TabOut
+        }
+        else {
+            nextIndex = 0;
+            log("TI"); //TI = TabIn
+        }
+        return nextIndex;
+    }
+    // Gets the next index based on keyboard event
+    function computeNextFocusedIndexFromArrow(isDownPress) {
+        var ret = -1;
+        // Don't start the experience until the user has tabbed to an element
+        if (activeElement) {
+            // If the order has been broken, we need to compute which element should be selected next based on
+            // the currently focused item.
+            if (orderBroken) {
+                orderBroken = false;
+                var index = selectableElements.indexOf(_d.activeElement);
+                // If the current focused item is in our list, just find its index, and handle normally
+                if (index !== -1) {
+                    ret = handleNormalIteration(isDownPress, index);
+                }
+                else {
+                    var elements = _w["NavSelector"] && NavSelector(true);
+                    var indexWithAdditionalFocus = elements.indexOf(_d.activeElement);
+                    if (indexWithAdditionalFocus !== -1) {
+                        ret = clampSelectedIndexBounds(isDownPress ? indexWithAdditionalFocus : indexWithAdditionalFocus - 1);
+                    }
+                }
+            }
+            else {
+                ret = handleNormalIteration(isDownPress, currentlySelectedIndex);
+            }
+            log(isDownPress ? "AD" : "AU", ret); // AD = ArrowDown, AU = ArrowUp
+        }
+        return ret;
+    }
+    // Handle a normal up or down iteration
+    function handleNormalIteration(isDownPress, currentIndex) {
+        return clampSelectedIndexBounds(isDownPress ? currentIndex + 1 : currentIndex - 1);
+    }
+    // Adjusts index if it gets out of bounds
+    function clampSelectedIndexBounds(index) {
+        return Math.max(Math.min(index, selectableElements.length - 1), 0);
+    }
+    function createArrowElement() {
+        arrowParentElement = sj_ce("div", "kn_p");
+        arrowElement = sj_ce("span", keyboardNavId);
+        arrowElement.innerHTML = "►";
+        arrowParentElement.appendChild(arrowElement);
+        arrowElement.title = "Use the up and down arrow keys to focus results";
+    }
+    // Sets a new active element, takes care of adding our arrow
+    function setActiveElement(index) {
+        currentlySelectedIndex = index;
+        activeElement = selectableElements[currentlySelectedIndex];
+        if (activeElement && activeElement.parentNode) {
+            activeElement.parentNode.insertBefore(arrowParentElement, activeElement.parentNode.firstChild);
+            scrollToShowElement(arrowParentElement);
+            activeElement.setAttribute("aria-live", "true");
+            activeElement.focus();
+        }
+    }
+    function removeExistingSpans() {
+        if (arrowParentElement && arrowParentElement.parentNode) {
+            arrowParentElement.parentNode.removeChild(arrowParentElement);
+        }
+    }
+    function scrollToShowElement(element) {
+        var clientRect = element.getBoundingClientRect();
+        if (clientRect.bottom > window.innerHeight) {
+            element.scrollIntoView();
+        }
+    }
+    sj_be(_d, "keydown", keyboardNavigation);
+    sj_be(_d.body, 'mousedown', onmousedown, true);
+    sj_evt.bind("ajax.load", initialize, 1, 1);
+    initialize();
+})(SerpKeyboardNavigation || (SerpKeyboardNavigation = {}));

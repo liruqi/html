@@ -1,0 +1,91 @@
+// <reference path="SerpKeyboardNavigation_Selector.d.ts" />
+// The goal of this selector is to select the following elements:
+// 1. Any header link (defined as an h2/h3/h4 followed by an anchor link)
+// 2. The first focusable element in an answer container, or the pole content
+//
+//    We define the first "focusable elements", as any of the following:
+//          a.   Any form element
+//          b.   Any link with an href
+//          c.   Anything that explicitly sets tabindex=0
+//    EXCLUDING:
+//          i.   Any element with display:none, or an ancestor with display:none
+//          ii.  Any element that explicitly sets tabindex=-1
+//          iii. Any answers that already contains header links.  Those will already be added
+var HeaderPlusAlgo_Selector;
+(function (HeaderPlusAlgo_Selector) {
+    var headerLinkSelector = "#b_results h2 a" + "," +
+        "#b_results h3 a" + "," +
+        "#b_results h4 a";
+    var formElementsSelector = "input, select, textarea"; // Selector for form elements 
+    var linkSelector = "a[href]"; // Selector for links with hrefs 
+    var tabIndexSelector = "*[tabindex = '0']"; // Selector for elements with explicit tabindex='0' 
+    var focusableUnderAnswerSelector = formElementsSelector + "," +
+        linkSelector + "," +
+        tabIndexSelector;
+    var answersSelector = "#b_results .b_ans"; // Selector for answers that we want to consider adding to focus order
+    var poleSelector = "#b_content #b_pole"; // Selector for pole position that we want to consider adding to focus order
+    var topLevelSelector = headerLinkSelector + "," +
+        answersSelector + "," +
+        poleSelector;
+    // This will get a list of selectable elements for the user to iterate through.
+    // All header links (h2 a, h3 a, h4 a) are added automatically.  For answers, we try to take the first 
+    // focusable element under that answer, and add it to the list.  We need to make sure if that answer already 
+    // contains a header link, don't do anything, since it will already be selected.  We don't want to add
+    // elements twice
+    function getSelectableElements(includeActive) {
+        var ret = [];
+        var topLevelSelectableElements = convertListToArray(sj_b.querySelectorAll(topLevelSelector + (includeActive ? ", :focus" : "")));
+        for (var i = 0; i < topLevelSelectableElements.length; i++) {
+            var currentElement = topLevelSelectableElements[i];
+            if (currentElement.className.indexOf("b_ans") != -1 || currentElement.id == "b_pole") {
+                var linksUnderAnswer = convertListToArray(currentElement.querySelectorAll(headerLinkSelector));
+                if (linksUnderAnswer.length == 0) {
+                    var firstFocusable = getFirstFocusableChild(currentElement);
+                    firstFocusable && ret.push(firstFocusable);
+                }
+            }
+            else {
+                if (!isDisplayNoned(currentElement)) {
+                    ret.push(currentElement);
+                }
+            }
+        }
+        return ret;
+    }
+    HeaderPlusAlgo_Selector.getSelectableElements = getSelectableElements;
+    function convertListToArray(list) {
+        var array = [];
+        for (var i = 0; i < list.length; i++) {
+            array.push(list[i]);
+        }
+        return array;
+    }
+    // Check if the element, or any parent element is set to display:none.
+    // Note a child cannot override a parents display:none with it's own display property
+    function isDisplayNoned(element) {
+        if (!element) {
+            // We've searched all parents, and never found a display:none.
+            return false;
+        }
+        else {
+            var style = window.getComputedStyle(element);
+            if (style && style.display == "none") {
+                return true;
+            }
+            else {
+                return isDisplayNoned(element.parentElement);
+            }
+        }
+    }
+    function getFirstFocusableChild(element) {
+        var focusableUnderAnswer = convertListToArray(element.querySelectorAll(focusableUnderAnswerSelector));
+        for (var i = 0; i < focusableUnderAnswer.length; i++) {
+            var child = focusableUnderAnswer[i];
+            if (!isDisplayNoned(child) && child.tabIndex != -1) {
+                return child;
+            }
+        }
+        return null;
+    }
+})(HeaderPlusAlgo_Selector || (HeaderPlusAlgo_Selector = {}));
+NavSelector = HeaderPlusAlgo_Selector.getSelectableElements;

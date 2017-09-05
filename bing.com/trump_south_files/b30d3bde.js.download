@@ -1,0 +1,17 @@
+///<reference path="../../../../../Shared/Content/Content/script/Declarations/Shared.d.ts"/>
+(function () {
+    var expiredDateString = new Date(0).toGMTString();
+    var dcCrumbName = "dmnchg";
+    try {
+        var dcCrumb = sj_cook.get("SRCHUID", dcCrumbName);
+        if (!dcCrumb) {
+            if (window.location.hostname == "www.bing.com") {
+                sj_cook.set("SRCHUID", dcCrumbName, "1", true); //This will create a cooke with SRCHUID name with domain .bing.com
+                _d.cookie = "SRCHUID=;path=/;expires=" + expiredDateString; //This will remove the cookie with domain www.bing.com
+            }
+        }
+    }
+    catch (e) {
+        Log.Log("srchuiddomainchange", "srchuiddomainchangeError", "srchuiddomainchangeError", false, "Error", "Error changing domain. Exception - " + e.message);
+    }
+})();

@@ -1,0 +1,660 @@
+/// <reference path="..\..\..\..\..\Shared\Content\Content\Script\Declarations\Shared.d.ts" />
+(function ($, document, window, createElement, preventDefault, stopPropagation, getOffset, bindEvent, documentBody) {
+    /// Helpers ///
+    /* From  http://bing/wiki/Client_Script_Framework
+    _ge - document.getElementById
+    _d - document
+    _w - window
+    sj_ce - document.createElement
+    sj_pd - e.preventDefault
+    sj_sp - e.stopPropagation
+    sj_go - GetOffset. get the absolute Top or Left position of an element on a page.
+    sj_be - Bind to dom event.
+    */
+    var hiddenClassName = "b_hide";
+    var selectedClassName = "b_selected";
+    var nonselectableClassName = "b_nonselectable";
+    var highLightedClassName = "b_highlighted";
+    var scrollClassName = "b_scroll";
+    var filtersRoot = $('LayoutFilterBar') ? $('LayoutFilterBar') : $('b_content');
+    // IE 9 or superior
+    var sb_i9p = sb_ie && (typeof sb_de.style.opacity != 'undefined');
+    // IE 8 or below
+    var sb_i8l = sb_ie && !sb_i9p;
+    // TODO: TFS: 144789 Use the Shared.js script framework versions when they're published. 
+    /* Get elements by className. */
+    function sj_geC(rootNode, className, opt_tagSelector) {
+        opt_tagSelector = opt_tagSelector || '*';
+        var candidates = rootNode.getElementsByTagName(opt_tagSelector);
+        var selection = [];
+        forEach(candidates, function (candidate) {
+            sj_hasC(candidate, className) && selection.push(candidate);
+        });
+        return selection;
+    }
+    var classNameRegex = {};
+    function getClassNameRegex(className) {
+        if (!classNameRegex[className]) {
+            classNameRegex[className] = new RegExp('\\b' + className + '\\b');
+        }
+        return classNameRegex[className];
+    }
+    /* Whether node has a class called className. */
+    function sj_hasC(node, className) {
+        var nodeClass = node.className || '';
+        return getClassNameRegex(className).test(nodeClass);
+    }
+    /* Add className as a class to node.
+    Does nothing if className already exists.
+    */
+    function sj_addC(node, className) {
+        node.className = node.className || '';
+        if (!sj_hasC(node, className)) {
+            node.className += ' ' + className;
+        }
+    }
+    /* Remove className as a class in node.
+    Does nothing if node has no class named className.
+    */
+    function sj_rmC(node, className) {
+        var nodeClass = node.className || '';
+        var regex = getClassNameRegex(className);
+        if (node && nodeClass && className)
+            node.className = node.className.replace(regex, '').replace(/\s+/, ' ');
+    }
+    /* Completely cancel an event, stop propagation and prevent default. */
+    function cancelEvent(e) {
+        stopPropagation(e);
+        preventDefault(e);
+        return false;
+    }
+    /* Return the absolute position of where a mouse event occured. */
+    function mousePosition(ev) {
+        ev = ev || window.event;
+        if (ev.pageX || ev.pageY) {
+            return { x: ev.pageX, y: ev.pageY };
+        }
+        return {
+            x: ev.clientX + documentBody.scrollLeft - documentBody.clientLeft,
+            y: ev.clientY + documentBody.scrollTop - documentBody.clientTop
+        };
+    }
+    /* Cross browser way to get the height of a dom element */
+    function clientHeight(el, includeMargins) {
+        var style = el.currentStyle;
+        var paddingHeight = 0;
+        if (_w.getComputedStyle) {
+            style = _w.getComputedStyle(el);
+            // In IE, padding top and bottom is removed from the computed style height. 
+            if (sb_ie) {
+                paddingHeight = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+            }
+        }
+        // fix for chrome zoom issue;
+        // when the chrome at 125% zoom, the style.height is 29, but clientHeight is 30, which make the scrollbar showed.
+        // when the chrome at 90% zoom, the style.height is a float 29.xxx, it should be 29.
+        var height = Math.round(parseFloat(style.height)) || el.clientHeight;
+        return height + paddingHeight + (includeMargins ? parseFloat(style.marginTop) + parseFloat(style.marginBottom) : 0);
+    }
+    function contentHeight(el) {
+        var height = 0;
+        for (var i = 0; i < el.childNodes.length; ++i) {
+            var child = el.childNodes[i];
+            /* workaround fix for firefox scrollbar:
+               'drvph' is an empty span (0 width), it's offsetHeight should be 0, but on Firefox, it's 14, which make the scrollbar showed.
+            */
+            if (child.offsetWidth) {
+                height += clientHeight(child, true);
+            }
+        }
+        return height;
+    }
+    /* Cross browser method to get the Y mouse coordinate of a mouse event relative to it's target. */
+    function offsetY(e) {
+        return e.offsetY || e.layerY;
+    }
+    function getText(el) {
+        if ('textContent' in el) {
+            return el.textContent;
+        }
+        return el.innerText;
+    }
+    /* Array foreach.
+    @param items - An array.
+    @param handler - function (item, index) called for each element of items.
+    @param context (optional) - Replaces the 'this' keyword when calling handler.
+    */
+    function forEach(items, handler, context) {
+        context = context || this;
+        for (var i = 0; i < items.length; i++) {
+            handler.call(context, items[i], i);
+        }
+    }
+    /* Make childClass inherit from parentClass.
+    For this to work, the childClass container must explicity call the parent class constructor in its constructor.
+    e.g.
+    function Parent() {
+    // init parent
+    }
+    function Child() {
+    Parent.call(this); // call parent constructor.
+    // init child
+    }
+    extend(Child, Parent);
+    */
+    function extend(childClass, parentClass) {
+        var obj = function () {
+        };
+        obj.prototype = parentClass.prototype;
+        childClass.prototype = new obj;
+        childClass.prototype.constructor = childClass;
+    }
+    /// UI CONTROLS ///
+    /* EventEmitter
+    Base UI control, emits events and notifies listeners.
+
+    var control = new EventEmitter();
+    control.addL('open', handlerFunction);
+    control.emit('open', param1, param2, ...);
+    */
+    function EventEmitter() {
+        var eventList = {};
+        /* Emit an event. */
+        this.emit = function (name) {
+            if (eventList[name]) {
+                var args = Array.prototype.slice.call(arguments, 1);
+                setTimeout(function () {
+                    forEach(eventList[name], function (handler) {
+                        handler.apply(this, args);
+                    }, this);
+                }, 0);
+            }
+        };
+        /* Add a listener to an event. */
+        this.addL = function (name, handler) {
+            if (!eventList[name]) {
+                eventList[name] = [];
+            }
+            eventList[name].push(handler);
+        };
+    }
+    /* Get the key code that was pressed for an keyboard event. */
+    function pressedKey(e) {
+        return e.keyCode || e.charCode || e.which;
+    }
+    /* Dropdown.
+    @emits 'open', 'close', 'enter', 'sel'
+    @param headerEl - element that opens the dropdown when clicked.
+    @param dropDownEl - element to show as the dropdown. Has class "b_dropdown".
+    <div class="b_dropdown"> <!-- dropDown -->
+    <div class="ftrD">
+    <div>foo</div>
+    <a>bar</a>
+    </div>
+    </div>
+    */
+    function DropDown(headerEl, dropDownEl, newItem) {
+        EventEmitter.call(this); // Base constructor.
+        var self = this;
+        var visible = false;
+        var selected = null;
+        var selectedItemCSSClass = null;
+        var items = dropDownEl.childNodes[0].childNodes;
+        var wasTab = false;
+        if (items.length == 0)
+            return; // No point having dropdowns with nothing in it. 
+        if (newItem) {
+            // This if bracket is to handle the case a new item being added to an existing drop down list
+            function selectItem() {
+                unselectedAll();
+            }
+            // Apply selected value class on mouse over. 
+            bindEvent(newItem, 'mouseover', selectItem);
+            bindEvent(newItem, 'focus', selectItem);
+            return;
+        }
+        function unselectedAll() {
+            if (dropDownEl == null || dropDownEl.childNodes == null || dropDownEl.firstChild == null || dropDownEl.firstChild.childNodes == null) {
+                return;
+            }
+            forEach(dropDownEl.firstChild.childNodes, function (item) {
+                sj_rmC(item, selectedClassName);
+            });
+            if (selected !== null && selectedItemCSSClass !== null) {
+                sj_rmC(selected, selectedItemCSSClass);
+            }
+            selected = null;
+            selectedItemCSSClass = null;
+        }
+        // Toggle show and hide when the header is focused (by tab or click).
+        bindEvent(headerEl, 'click', function (e) {
+            cancelEvent(e);
+            visible ? self.hide() : self.show();
+        });
+        forEach(items, function (el) {
+            function selectItem() {
+                unselectedAll();
+                if (!sj_hasC(el, nonselectableClassName)) {
+                    self.sel(el);
+                }
+            }
+            // Apply selected value class on mouse over. 
+            bindEvent(el, 'mouseover', selectItem);
+            bindEvent(el, 'focus', selectItem);
+        });
+        // IE only supports .relatedTarget for focusout events, not blur
+        if (sb_ie) {
+            sj_be(dropDownEl.parentElement, "focusout", shouldHide, false);
+        }
+        else {
+            sj_be(dropDownEl.parentElement, "blur", shouldHide, true);
+        }
+        // There are some pop up modern calendar elements that are a part of the dropdown but a child of the dropdown in the DOM
+        // This way, we make sure that the DOM doesn't close if they are clicked. 
+        function shouldHide(evt) {
+            var e = sj_ev(evt);
+            if (!this.contains(e.relatedTarget) && wasTab) {
+                self.hide();
+            }
+            wasTab = false;
+        }
+        // Keyboard events. Events will be consumed when they are handled by the dropdown.
+        bindEvent(dropDownEl.parentElement, 'keydown', function (e) {
+            if (!visible)
+                return;
+            var cancel = visible;
+            var keyPress = pressedKey(e);
+            switch (true) {
+                case keyPress === 38:
+                    self.up();
+                    break;
+                case keyPress === 40:
+                    self.down();
+                    break;
+                case keyPress === 13:
+                    // Want to be able to open/close the header with a "enter press"
+                    if (document.activeElement == headerEl) {
+                        headerEl.click();
+                    }
+                    else {
+                        var lmContainer = _ge('lMapContainer');
+                        if (lmContainer && lmContainer.contains(self.dropDownEl)) {
+                            if (selected) {
+                                selected.click();
+                            }
+                        }
+                        else {
+                            self.emit('enter', selected);
+                        }
+                    }
+                    break;
+                case keyPress === 27:
+                    self.hide();
+                    break;
+                case ((keyPress >= 65) && (keyPress <= 90)):
+                    self.selectKeyPress(keyPress);
+                    cancel = false;
+                    break;
+                case keyPress === 9 /* Tab */:
+                    // If tab is pressed, something different is going to be selected
+                    // We want to unselect everything, but not cancel the event so that
+                    // it can continute propegating 
+                    unselectedAll();
+                    cancel = false;
+                    wasTab = true;
+                default:
+                    cancel = false;
+            }
+            // Consume the event if it was handled.
+            cancel && cancelEvent(e);
+        });
+        this.selectKeyPress = function (key) {
+            for (var i = 0; i < items.length; i++) {
+                var text = getText(items[i]);
+                if (text.length >= 1) {
+                    var charCode = text.charCodeAt(0);
+                    if (key === charCode && items[i].className.indexOf('b_selected') == -1) {
+                        this.sel(items[i]);
+                        break;
+                    }
+                }
+            }
+        };
+        this.hide = function () {
+            sj_addC(dropDownEl, hiddenClassName);
+            visible = false;
+            unselectedAll();
+            this.emit('close', this);
+        };
+        this.show = function () {
+            sj_rmC(dropDownEl, hiddenClassName);
+            visible = true;
+            this.emit('open', this);
+        };
+        this.up = function () {
+            var sibling = selected ? selected.previousSibling : items[items.length - 1];
+            if (sibling) {
+                this.sel(sibling);
+            }
+        };
+        this.down = function () {
+            var sibling = selected ? selected.nextSibling : items[0];
+            if (sibling) {
+                this.sel(sibling);
+            }
+        };
+        this.sel = function (item) {
+            unselectedAll();
+            selected = item;
+            item.focus();
+            sj_addC(item, selectedClassName);
+            this.emit('sel', item);
+        };
+        this.visible = function () {
+            return visible;
+        };
+        this.dropDownEl = dropDownEl;
+    }
+    extend(DropDown, EventEmitter);
+    /* Scrollable
+    Element with custom scrollbars.
+    @emits 'dragstart', 'dragend'
+    @param containerEl - element to add scrollbars to.
+
+    For this to work, containerEl must be a relative or absolute positioned outer div with a single content div inside that will be scrolled.
+    <div class="containerEl">
+    <div class="contentEl">this content will scroll...</div>
+    </div>
+    */
+    function Scrollable(containerEl) {
+        EventEmitter.call(this);
+        var self = this;
+        var contentEl = containerEl.childNodes[0];
+        var scrollbarRegion = createElement('div');
+        var scrollbar = createElement('div');
+        scrollbarRegion.className = 'ftrSbR';
+        scrollbar.className = scrollClassName;
+        scrollbarRegion.appendChild(scrollbar);
+        containerEl.appendChild(scrollbarRegion);
+        // Saved state of content scroll position.
+        var contentScrollTop = 0;
+        // Height of the scrollbar.
+        var scrollbarHeight = 0;
+        // Relative top position of the scrollbar.
+        var scrollbarPos = 0;
+        // Draging state.
+        var dragging = false;
+        // Relative Y position at the start of a drag.
+        var dragStartY = 0;
+        // Update the content position based on the scrollbar position.
+        // Update the scrollbar height incase the content has changed.
+        // Useful if the content scroll position gets reset and we want to restore the scroll position.
+        this.update = function (dontUpdateScrollbarHeight) {
+            var contentClientHeight = clientHeight(contentEl);
+            if (!dontUpdateScrollbarHeight) {
+                scrollbarHeight = Math.max(contentClientHeight * contentClientHeight / contentEl.scrollHeight, 10);
+                scrollbar.style.height = scrollbarHeight + 'px';
+                contentEl.scrollTop = contentScrollTop;
+                contentScrollTop = contentEl.scrollTop; // The actual scroll top will clip at the top and bottom.
+            }
+            scrollbarRegion.style.height = contentClientHeight - 10 + 'px';
+            scrollbarPos = contentScrollTop / (contentEl.scrollHeight - contentClientHeight) * (clientHeight(scrollbarRegion) - clientHeight(scrollbar));
+            scrollbar.style.top = scrollbarPos + 'px';
+        };
+        // Move scrolltop to the given y value.
+        this.scrollTo = function (yValue, dontUpdateScrollbarHeight) {
+            if (yValue != contentScrollTop) {
+                contentScrollTop = yValue;
+                this.update(dontUpdateScrollbarHeight);
+            }
+        };
+        // Scroll and center the element. el must be an element in the content.
+        this.ctr = function (el) {
+            var elY = getOffset(el, 'Top');
+            var contentY = getOffset(contentEl, 'Top');
+            var relPos = elY - contentY - contentScrollTop;
+            var diff = elY - contentY;
+            if (relPos < 0) {
+                contentScrollTop = diff;
+            }
+            else if (relPos - clientHeight(contentEl) + clientHeight(el) > 0) {
+                contentScrollTop = diff - clientHeight(contentEl) + clientHeight(el);
+            }
+            this.update();
+        };
+        // Make scrollbar jump to a position when the scrollbar container is clicked. 
+        bindEvent(scrollbarRegion, 'mousedown', function (e) {
+            cancelEvent(e);
+            var scrollAmount = offsetY(e) / clientHeight(scrollbarRegion) * contentEl.scrollHeight - clientHeight(scrollbar);
+            self.scrollTo(scrollAmount);
+        });
+        // Stop event propagation if the scrollbar is clicked (prevents scrollbar from jumping caused by the event propagating to the scroll container).
+        bindEvent(scrollbar, 'mousedown', cancelEvent);
+        // Make mouse scrolling work.
+        function scroll(e) {
+            cancelEvent(e);
+            // Chrome/IE uses e.wheelDelta to indicate the distance scrolled. Firefox uses e.detail to indicate number of ticks on the scrollwheel.
+            contentScrollTop -= (e.wheelDelta ? e.wheelDelta / 5 : -e.detail * 10);
+            self.update();
+            return false;
+        }
+        ;
+        bindEvent(containerEl, 'mousewheel', scroll, true);
+        bindEvent(containerEl, 'DOMMouseScroll', scroll, true); // FF
+        // Make mouse dragging the scrollbar work.
+        bindEvent(scrollbar, 'mousedown', function (e) {
+            cancelEvent(e); // Swallow the mouse down event.
+            dragging = true;
+            dragStartY = offsetY(e); // FF uses layerY only.
+            self.emit('dragstart');
+            return false;
+        });
+        bindEvent(document, 'mouseup', function () {
+            if (dragging) {
+                dragging = false;
+                self.emit('dragend');
+            }
+        });
+        bindEvent(document, 'mousemove', function (e) {
+            if (dragging) {
+                var mouseY = mousePosition(e).y;
+                var scrollY = getOffset(scrollbar, 'Top');
+                // subtract the distance between the y location of where the scrollbar was clicked and the mouse position. 
+                contentScrollTop -= (scrollY + dragStartY) - mouseY;
+                self.update();
+            }
+        });
+        // Disable text selection on drag when dragging the scrollbar.
+        bindEvent(document, 'selectstart', function (e) {
+            dragging && cancelEvent(e);
+            return false;
+        });
+    }
+    extend(Scrollable, EventEmitter);
+    // Initialize the dropdowns. 
+    function ftrInit() {
+        var headerEls = sj_geC(filtersRoot, 'ftrH', 'a');
+        var dropDowns = [];
+        var scrollbars = [];
+        // Make sure the drop down doesn't close when the mouse up event fires after dragging the scrollbar. 
+        var justDraggedScrollbar = false;
+        // Initialize the scrollbar.
+        function initScrollbar(dropdown) {
+            var dropdownEl = dropdown.dropDownEl;
+            var ftrD = dropdownEl.childNodes[0];
+            if (contentHeight(ftrD) > clientHeight(ftrD)) {
+                sj_addC(dropdownEl, 'ftrS');
+                var scrollable = new Scrollable(dropdownEl);
+                scrollable.addL('dragend', function () {
+                    justDraggedScrollbar = true;
+                });
+                // If the user uses the keyboard to navigate the dropdown, make sure we scroll so it's visible.
+                dropdown.addL('sel', function (selected) {
+                    scrollable.ctr(selected);
+                });
+                // adjust size for scroll
+                var correctWidth = dropdownEl.offsetWidth;
+                dropdownEl.style.width = correctWidth + 'px';
+                dropdownEl.style.overflowX = 'hidden';
+                var bufferToEnsureBrowserScrollbarIsHidden = 30;
+                ftrD.style.width = correctWidth + bufferToEnsureBrowserScrollbarIsHidden + 'px';
+                ftrD.style.overflowY = 'scroll';
+                return scrollable;
+            }
+            return null;
+        }
+        // Close all but thisDropdown.
+        function closeAll(thisDropdown) {
+            forEach(dropDowns, function (dropdown) {
+                thisDropdown !== dropdown && dropdown.hide();
+            });
+        }
+        forEach(headerEls, function (header) {
+            // Initialize drop downs.
+            var dropdownEl = $(header.uid);
+            if (!dropdownEl) {
+                // Element has no dropdown.
+                return;
+            }
+            var newDropDown = new DropDown(header, dropdownEl, null);
+            dropDowns.push(newDropDown);
+            (function (dropdown, dropdownEl) {
+                var scrollable;
+                var ftrD = dropdownEl.childNodes[0];
+                // listen to postload event, update current display dropdown scrollbar.
+                sj_evt.bind("QIUI.Postloaded", function () {
+                    for (var i in dropDowns) {
+                        var dropDown = dropDowns[i];
+                        if (dropDown.visible) {
+                            scrollable = initScrollbar(dropDown);
+                            scrollable && scrollable.update();
+                        }
+                    }
+                });
+                // When dropdowns open, hightlight the header and select the applied value.
+                dropdown.addL('open', function () {
+                    scrollable = scrollable || initScrollbar(dropdown);
+                    // When dropdowns open, hightlight the header and select the applied value.
+                    closeAll(dropdown);
+                    sj_addC(header, selectedClassName);
+                    var items = sj_geC(dropdownEl, highLightedClassName);
+                    if (items.length > 0) {
+                        dropdown.sel(items[0].parentNode);
+                        scrollable && scrollable.ctr(items[0].parentNode);
+                    }
+                    // Fix IE7 bug where the dropdown text is being truncated.
+                    var width = 0;
+                    if (sb_i8l) {
+                        forEach(ftrD.childNodes, function (element) {
+                            if (width < element.offsetWidth)
+                                width = element.offsetWidth;
+                        });
+                        ftrD.style.width = width + 'px';
+                    }
+                    // Make sure the width of the dropdown is at least as wide as the header.
+                    if (header.offsetWidth > ftrD.offsetWidth) {
+                        ftrD.style.minWidth = header.offsetWidth + 'px';
+                    }
+                    // Below is to handle the post loaded calendar control
+                    var placeholder = _ge("drvph");
+                    if (placeholder && placeholder.getAttribute('data-url')) {
+                        var container = placeholder.parentElement;
+                        if (container === ftrD) {
+                            var url = placeholder.getAttribute('data-url');
+                            sj_ajax(url, {
+                                callback: function (success, response) {
+                                    if (success) {
+                                        container.removeChild(placeholder);
+                                        response.appendTo(container);
+                                        rms.start();
+                                        var header = container.parentElement.parentElement.childNodes[0];
+                                        var newItem = container.getElementsByTagName('div')[0];
+                                        DropDown(header, container.parentElement, newItem);
+                                    }
+                                    ;
+                                },
+                                timeout: 5000
+                            });
+                        }
+                    }
+                    // Notify others dropdowns on SERP to close now that filters are open. 
+                    sj_evt.fire('focusChange', 'ftrB');
+                    scrollable && scrollable.update();
+                });
+                // Keep fake scroller in sync with real & hidden scroller
+                bindEvent(ftrD, 'scroll', function (e) {
+                    scrollable && scrollable.scrollTo(ftrD.scrollTop, true);
+                });
+                // Remove highlighting on the header when the dropdown closes.
+                dropdown.addL('close', function () {
+                    sj_rmC(header, selectedClassName);
+                });
+                // Custom click when user presses enter on the keyboard to select a filter.
+                dropdown.addL('enter', function (selected) {
+                    // "Click" the item to fire the gping. 
+                    if (selected && selected.tagName === 'A') {
+                        var nav = true;
+                        if (selected.onmousedown)
+                            nav = selected.onmousedown();
+                        nav && (window.location = selected.href);
+                    }
+                });
+            })(newDropDown, dropdownEl);
+        });
+        // Prevent no result values from closing the drop down when clicked.
+        var noResults = sj_geC(filtersRoot, nonselectableClassName);
+        forEach(noResults, function (el) {
+            bindEvent(el, 'click', cancelEvent);
+        });
+        sj_evt.bind('focusChange', function (args) {
+            if (args[1] !== 'ftrB' && args[1] !== "ccal_bundle")
+                closeAll();
+        });
+        // Close all dropdowns when we click out of the dropdown area.
+        bindEvent(document, 'click', function () {
+            sb_st(function () {
+                if (!justDraggedScrollbar) {
+                    closeAll();
+                }
+                justDraggedScrollbar = false;
+            }, 1);
+        });
+        forEach(sj_geC(filtersRoot, 'ftrHd', 'span'), function (header) {
+            bindEvent(header, 'mouseover', function () {
+                var nodes = sj_geC(header, 'sw_tpcg', 'span');
+                nodes[0].className = 'sw_tpcbl';
+            });
+            bindEvent(header, 'mouseout', function () {
+                var nodes = sj_geC(header, 'sw_tpcbl', 'span');
+                nodes[0].className = 'sw_tpcg';
+            });
+        });
+    }
+    function delayLoad() {
+        var headers = sj_geC(filtersRoot, 'ftrH', 'a');
+        forEach(headers, function (header) {
+            var id = header.id.replace('h', 'd');
+            // Add the dropdown id to the header and dropdown elements so it's easy to reference later.
+            header.uid = id;
+            var dropdown = $(id);
+            if (dropdown) {
+                dropdown.uid = id;
+                header.parentNode.appendChild(dropdown);
+            }
+        });
+    }
+    function initFilters() {
+        sj_evt.unbind("filterattached", initFilters);
+        delayLoad();
+        ftrInit();
+    }
+    if (_w["OverLayFilterBar"] != null) {
+        filtersRoot = _w["OverLayFilterBar"];
+        sj_evt.bind("filterattached", initFilters);
+        _w["OverLayFilterBar"] = null;
+    }
+    else {
+        delayLoad();
+        ftrInit();
+    }
+})(_ge, _d, _w, sj_ce, sj_pd, sj_sp, sj_go, sj_be, sj_b);

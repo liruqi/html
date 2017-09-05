@@ -1,0 +1,1133 @@
+/// <reference path="./DateTimeFormatter.ts" />
+var BingAtWork;
+(function (BingAtWork) {
+    // Events fired when command call to paw is made.
+    BingAtWork.rawCmdEvent = "rawcomd";
+    BingAtWork.rawCmdErr = "bfbqasfailure";
+    // Events fired when data call to paw is made.
+    BingAtWork.rawDataEvent = "rawdata";
+    BingAtWork.rawDataErr = "bfbdatafailure";
+    BingAtWork.bfbPreExists = "bfbPreExists";
+    BingAtWork.ajaxLoad = "ajax.load";
+    BingAtWork.ajaxUnload = "ajax.unload";
+    BingAtWork.skypeSignedIn = "bfbskypesi";
+    BingAtWork.onTenantConfig = "bfbtcfg";
+    BingAtWork.onBawInitFinish = "onBawInitFinish";
+    BingAtWork.onBingFdbkStart = "onFeedbackStarting";
+    BingAtWork.onBawFloorPlanRendered = "onBawFloorPlanRendered";
+    BingAtWork.onBawFloorPlanRoomFetched = "onBawFloorPlanRoomFetched";
+    BingAtWork.onBawFloorPlanMapFetched = "onBawFloorPlanMapFetched";
+    BingAtWork.onBawFloorPlanLoaded = "onBawFloorPlanLoaded";
+    BingAtWork.onBawBuildingRendered = "onBawBuildingRendered";
+    BingAtWork.onBawGroupAboutRendered = "onBawGroupAboutRendered";
+    BingAtWork.bawSourceName = "BingAtWork";
+    BingAtWork.fireUpsell = "bfbup";
+    BingAtWork.befRndPre = "bfr"; // before view render event name prefix
+    BingAtWork.cmdHandled = "bfbcmdhld"; // command response is handled in bfbcontroller
+    BingAtWork.mapUrlTypeStatic = "s";
+    BingAtWork.mapUrlTypeDraggable = "d";
+    var BfbRequestScenario;
+    (function (BfbRequestScenario) {
+        BfbRequestScenario[BfbRequestScenario["RawQuery"] = 0] = "RawQuery";
+        BfbRequestScenario[BfbRequestScenario["PersonDocuments"] = 1] = "PersonDocuments";
+        BfbRequestScenario[BfbRequestScenario["Documents"] = 2] = "Documents";
+        BfbRequestScenario[BfbRequestScenario["OrgChart"] = 3] = "OrgChart";
+        BfbRequestScenario[BfbRequestScenario["PersonGroups"] = 4] = "PersonGroups";
+        BfbRequestScenario[BfbRequestScenario["Command"] = 5] = "Command";
+        BfbRequestScenario[BfbRequestScenario["Groups"] = 6] = "Groups";
+        BfbRequestScenario[BfbRequestScenario["GroupMembers"] = 7] = "GroupMembers";
+        BfbRequestScenario[BfbRequestScenario["GroupConversations"] = 8] = "GroupConversations";
+        BfbRequestScenario[BfbRequestScenario["GroupFiles"] = 9] = "GroupFiles";
+        BfbRequestScenario[BfbRequestScenario["GroupDetails"] = 10] = "GroupDetails";
+    })(BfbRequestScenario = BingAtWork.BfbRequestScenario || (BingAtWork.BfbRequestScenario = {}));
+    var BfbResponseScenario;
+    (function (BfbResponseScenario) {
+        BfbResponseScenario[BfbResponseScenario["Person"] = 0] = "Person";
+        BfbResponseScenario[BfbResponseScenario["Document"] = 1] = "Document";
+        BfbResponseScenario[BfbResponseScenario["PersonDocument"] = 2] = "PersonDocument";
+        BfbResponseScenario[BfbResponseScenario["Task"] = 3] = "Task";
+        BfbResponseScenario[BfbResponseScenario["OrgChart"] = 4] = "OrgChart";
+        BfbResponseScenario[BfbResponseScenario["Groups"] = 5] = "Groups";
+        BfbResponseScenario[BfbResponseScenario["GroupMembers"] = 6] = "GroupMembers";
+        BfbResponseScenario[BfbResponseScenario["GroupConversations"] = 7] = "GroupConversations";
+        BfbResponseScenario[BfbResponseScenario["GroupFiles"] = 8] = "GroupFiles";
+        BfbResponseScenario[BfbResponseScenario["GroupDetails"] = 9] = "GroupDetails";
+        BfbResponseScenario[BfbResponseScenario["Command"] = 10] = "Command";
+        BfbResponseScenario[BfbResponseScenario["NoMatch"] = 11] = "NoMatch";
+        BfbResponseScenario[BfbResponseScenario["FloorPlan"] = 12] = "FloorPlan";
+        BfbResponseScenario[BfbResponseScenario["Buildings"] = 13] = "Buildings";
+        BfbResponseScenario[BfbResponseScenario["RefQna"] = 14] = "RefQna";
+        BfbResponseScenario[BfbResponseScenario["PowerBi"] = 15] = "PowerBi";
+    })(BfbResponseScenario = BingAtWork.BfbResponseScenario || (BingAtWork.BfbResponseScenario = {}));
+    var IrasEndpoint;
+    (function (IrasEndpoint) {
+        IrasEndpoint[IrasEndpoint["PersonalSearch"] = 0] = "PersonalSearch";
+        IrasEndpoint[IrasEndpoint["Command"] = 1] = "Command";
+        IrasEndpoint[IrasEndpoint["Download"] = 2] = "Download";
+        IrasEndpoint[IrasEndpoint["Browse"] = 3] = "Browse";
+        IrasEndpoint[IrasEndpoint["Details"] = 4] = "Details";
+    })(IrasEndpoint = BingAtWork.IrasEndpoint || (BingAtWork.IrasEndpoint = {}));
+    var IrasDownloadKind;
+    (function (IrasDownloadKind) {
+        IrasDownloadKind[IrasDownloadKind["ContactPhoto"] = 0] = "ContactPhoto";
+        IrasDownloadKind[IrasDownloadKind["GroupPhoto"] = 1] = "GroupPhoto";
+    })(IrasDownloadKind = BingAtWork.IrasDownloadKind || (BingAtWork.IrasDownloadKind = {}));
+    var ScopeDomain;
+    (function (ScopeDomain) {
+        ScopeDomain[ScopeDomain["Person"] = 0] = "Person";
+        ScopeDomain[ScopeDomain["Task"] = 1] = "Task";
+        ScopeDomain[ScopeDomain["File"] = 2] = "File";
+        ScopeDomain[ScopeDomain["Group"] = 3] = "Group";
+        ScopeDomain[ScopeDomain["Buildings"] = 4] = "Buildings";
+        ScopeDomain[ScopeDomain["Email"] = 5] = "Email";
+        ScopeDomain[ScopeDomain["RefQna"] = 6] = "RefQna";
+        ScopeDomain[ScopeDomain["PowerBi"] = 7] = "PowerBi";
+    })(ScopeDomain = BingAtWork.ScopeDomain || (BingAtWork.ScopeDomain = {}));
+    // Order is important
+    var PersonCardPivot;
+    (function (PersonCardPivot) {
+        PersonCardPivot[PersonCardPivot["PersonAbout"] = 0] = "PersonAbout";
+        PersonCardPivot[PersonCardPivot["Documents"] = 1] = "Documents";
+        PersonCardPivot[PersonCardPivot["Organization"] = 2] = "Organization";
+        PersonCardPivot[PersonCardPivot["Groups"] = 3] = "Groups";
+        PersonCardPivot[PersonCardPivot["FloorPlan"] = 4] = "FloorPlan";
+    })(PersonCardPivot = BingAtWork.PersonCardPivot || (BingAtWork.PersonCardPivot = {}));
+    // Order is important
+    var DocumentSearchPivot;
+    (function (DocumentSearchPivot) {
+        DocumentSearchPivot[DocumentSearchPivot["Personalized"] = 0] = "Personalized";
+        DocumentSearchPivot[DocumentSearchPivot["All"] = 1] = "All";
+    })(DocumentSearchPivot = BingAtWork.DocumentSearchPivot || (BingAtWork.DocumentSearchPivot = {}));
+    // Order is important
+    var GroupSearchPivot;
+    (function (GroupSearchPivot) {
+        GroupSearchPivot[GroupSearchPivot["GroupAbout"] = 0] = "GroupAbout";
+        GroupSearchPivot[GroupSearchPivot["Members"] = 1] = "Members";
+        GroupSearchPivot[GroupSearchPivot["Files"] = 2] = "Files";
+        GroupSearchPivot[GroupSearchPivot["Conversations"] = 3] = "Conversations";
+    })(GroupSearchPivot = BingAtWork.GroupSearchPivot || (BingAtWork.GroupSearchPivot = {}));
+    var GroupSearchPivot2;
+    (function (GroupSearchPivot2) {
+        GroupSearchPivot2[GroupSearchPivot2["Owners"] = 0] = "Owners";
+        GroupSearchPivot2[GroupSearchPivot2["Members"] = 1] = "Members";
+        GroupSearchPivot2[GroupSearchPivot2["Files"] = 2] = "Files";
+        GroupSearchPivot2[GroupSearchPivot2["Conversations"] = 3] = "Conversations";
+    })(GroupSearchPivot2 = BingAtWork.GroupSearchPivot2 || (BingAtWork.GroupSearchPivot2 = {}));
+    var ErrorReason;
+    (function (ErrorReason) {
+        ErrorReason[ErrorReason["Iras401"] = 0] = "Iras401";
+        ErrorReason[ErrorReason["Iras403"] = 1] = "Iras403";
+        ErrorReason[ErrorReason["Iras500"] = 2] = "Iras500";
+        ErrorReason[ErrorReason["IrasOther"] = 3] = "IrasOther";
+        ErrorReason[ErrorReason["AuthFail"] = 4] = "AuthFail";
+        ErrorReason[ErrorReason["Timeout"] = 5] = "Timeout";
+        ErrorReason[ErrorReason["HttpError"] = 6] = "HttpError";
+        ErrorReason[ErrorReason["Other"] = 7] = "Other";
+        ErrorReason[ErrorReason["BadParam"] = 8] = "BadParam";
+        ErrorReason[ErrorReason["NotFound"] = 9] = "NotFound";
+        ErrorReason[ErrorReason["InvalidData"] = 10] = "InvalidData";
+    })(ErrorReason = BingAtWork.ErrorReason || (BingAtWork.ErrorReason = {}));
+    var ProcessingStatus;
+    (function (ProcessingStatus) {
+        ProcessingStatus[ProcessingStatus["Started"] = 0] = "Started";
+        ProcessingStatus[ProcessingStatus["Timeout"] = 1] = "Timeout";
+        ProcessingStatus[ProcessingStatus["NoResults"] = 2] = "NoResults";
+        ProcessingStatus[ProcessingStatus["Complete"] = 3] = "Complete";
+        ProcessingStatus[ProcessingStatus["SsoPending"] = 4] = "SsoPending";
+        ProcessingStatus[ProcessingStatus["ErrorPrivateGroup"] = 5] = "ErrorPrivateGroup";
+        ProcessingStatus[ProcessingStatus["ErrorMfa"] = 6] = "ErrorMfa";
+        ProcessingStatus[ProcessingStatus["ErrorGeneral"] = 7] = "ErrorGeneral";
+    })(ProcessingStatus = BingAtWork.ProcessingStatus || (BingAtWork.ProcessingStatus = {}));
+    var RankingRuleId;
+    (function (RankingRuleId) {
+        RankingRuleId[RankingRuleId["MeQueryPromotion"] = 0] = "MeQueryPromotion";
+        RankingRuleId[RankingRuleId["SerpRequerySuppression"] = 1] = "SerpRequerySuppression";
+        RankingRuleId[RankingRuleId["Person"] = 2] = "Person";
+        RankingRuleId[RankingRuleId["BfbRequeryPromotion"] = 3] = "BfbRequeryPromotion";
+        RankingRuleId[RankingRuleId["PersonQuerySuppression"] = 4] = "PersonQuerySuppression";
+        RankingRuleId[RankingRuleId["GroupSuppression"] = 5] = "GroupSuppression";
+        RankingRuleId[RankingRuleId["OrgRelPromotion"] = 6] = "OrgRelPromotion";
+        RankingRuleId[RankingRuleId["SuppressFarDistancePartialName"] = 7] = "SuppressFarDistancePartialName";
+        RankingRuleId[RankingRuleId["UserExplicit"] = 9] = "UserExplicit";
+        RankingRuleId[RankingRuleId["PoleDefaultTreatment"] = 10] = "PoleDefaultTreatment";
+        RankingRuleId[RankingRuleId["Groups"] = 11] = "Groups";
+        RankingRuleId[RankingRuleId["DisambigPersonsForMobile"] = 12] = "DisambigPersonsForMobile";
+        RankingRuleId[RankingRuleId["MobileDefaultPole"] = 13] = "MobileDefaultPole";
+        RankingRuleId[RankingRuleId["RefQna"] = 14] = "RefQna";
+        RankingRuleId[RankingRuleId["Documents"] = 15] = "Documents";
+        RankingRuleId[RankingRuleId["SuppressNonBookmarkForUrlQueries"] = 16] = "SuppressNonBookmarkForUrlQueries";
+        RankingRuleId[RankingRuleId["Bookmarks"] = 17] = "Bookmarks";
+        RankingRuleId[RankingRuleId["Buildings"] = 18] = "Buildings";
+        RankingRuleId[RankingRuleId["OverrideExplicit"] = 19] = "OverrideExplicit";
+        RankingRuleId[RankingRuleId["PowerBi"] = 20] = "PowerBi";
+    })(RankingRuleId = BingAtWork.RankingRuleId || (BingAtWork.RankingRuleId = {}));
+    var FileType;
+    (function (FileType) {
+        FileType[FileType["Word"] = 0] = "Word";
+        FileType[FileType["PowerPoint"] = 1] = "PowerPoint";
+        FileType[FileType["Excel"] = 2] = "Excel";
+        FileType[FileType["Unexpected"] = 3] = "Unexpected";
+    })(FileType = BingAtWork.FileType || (BingAtWork.FileType = {}));
+    var QueryFrequency;
+    (function (QueryFrequency) {
+        QueryFrequency[QueryFrequency["High"] = 0] = "High";
+        QueryFrequency[QueryFrequency["Medium"] = 1] = "Medium";
+        QueryFrequency[QueryFrequency["Low"] = 2] = "Low";
+        QueryFrequency[QueryFrequency["Unknown"] = 3] = "Unknown";
+    })(QueryFrequency = BingAtWork.QueryFrequency || (BingAtWork.QueryFrequency = {}));
+    var QueryBehavior;
+    (function (QueryBehavior) {
+        QueryBehavior[QueryBehavior["None"] = 0] = "None";
+        QueryBehavior[QueryBehavior["Suppress"] = 1] = "Suppress";
+        QueryBehavior[QueryBehavior["BingAtWorkRequery"] = 2] = "BingAtWorkRequery";
+        QueryBehavior[QueryBehavior["SerpRequery"] = 3] = "SerpRequery";
+        QueryBehavior[QueryBehavior["Upsell"] = 4] = "Upsell";
+    })(QueryBehavior = BingAtWork.QueryBehavior || (BingAtWork.QueryBehavior = {}));
+    var WebIntentConfidence;
+    (function (WebIntentConfidence) {
+        WebIntentConfidence[WebIntentConfidence["Low"] = 0] = "Low";
+        WebIntentConfidence[WebIntentConfidence["Medium"] = 1] = "Medium";
+        WebIntentConfidence[WebIntentConfidence["High"] = 2] = "High";
+    })(WebIntentConfidence = BingAtWork.WebIntentConfidence || (BingAtWork.WebIntentConfidence = {}));
+    // Query intent param in the bing request url
+    // Note: keep it the same as QueryIntent.cs
+    var QueryIntent;
+    (function (QueryIntent) {
+        QueryIntent[QueryIntent["None"] = 0] = "None";
+        QueryIntent[QueryIntent["OrgChart"] = 1] = "OrgChart";
+        QueryIntent[QueryIntent["Email"] = 2] = "Email";
+        QueryIntent[QueryIntent["Office"] = 3] = "Office";
+        QueryIntent[QueryIntent["Phone"] = 4] = "Phone";
+        QueryIntent[QueryIntent["Title"] = 5] = "Title";
+        QueryIntent[QueryIntent["Department"] = 6] = "Department";
+        QueryIntent[QueryIntent["Group"] = 7] = "Group";
+        QueryIntent[QueryIntent["GroupMembers"] = 8] = "GroupMembers";
+        QueryIntent[QueryIntent["GroupFiles"] = 9] = "GroupFiles";
+        QueryIntent[QueryIntent["GroupConversations"] = 10] = "GroupConversations";
+        QueryIntent[QueryIntent["Building"] = 11] = "Building";
+        QueryIntent[QueryIntent["PersonDocs"] = 12] = "PersonDocs";
+        QueryIntent[QueryIntent["Alias"] = 13] = "Alias";
+    })(QueryIntent = BingAtWork.QueryIntent || (BingAtWork.QueryIntent = {}));
+    var OrgChartPersonType;
+    (function (OrgChartPersonType) {
+        OrgChartPersonType[OrgChartPersonType["SkipLevelManager"] = 0] = "SkipLevelManager";
+        OrgChartPersonType[OrgChartPersonType["Manager"] = 1] = "Manager";
+        OrgChartPersonType[OrgChartPersonType["Hero"] = 2] = "Hero";
+        OrgChartPersonType[OrgChartPersonType["Direct"] = 3] = "Direct";
+    })(OrgChartPersonType = BingAtWork.OrgChartPersonType || (BingAtWork.OrgChartPersonType = {}));
+    // See 
+    // //depot/dev/qas/private/answers/SDS/QCS/lib/src/mlg3.4/DUReportingChainDistance.h#7
+    // for details.
+    // Basicly, it described the relationship between the logged in user & the response person.
+    var OrgRelationship;
+    (function (OrgRelationship) {
+        OrgRelationship[OrgRelationship["UserIsPeer"] = 0] = "UserIsPeer";
+        OrgRelationship[OrgRelationship["UserIsReport"] = 1] = "UserIsReport";
+        OrgRelationship[OrgRelationship["UserIsManager"] = 2] = "UserIsManager";
+        OrgRelationship[OrgRelationship["UserIsSelf"] = 3] = "UserIsSelf";
+        OrgRelationship[OrgRelationship["UserIsNotInOrg"] = 4] = "UserIsNotInOrg";
+    })(OrgRelationship = BingAtWork.OrgRelationship || (BingAtWork.OrgRelationship = {}));
+    var DataType;
+    (function (DataType) {
+        DataType[DataType["Email"] = 0] = "Email";
+        DataType[DataType["Phone"] = 1] = "Phone";
+        DataType[DataType["Office"] = 2] = "Office";
+        DataType[DataType["GroupOwners"] = 3] = "GroupOwners";
+        DataType[DataType["Other"] = 4] = "Other";
+    })(DataType = BingAtWork.DataType || (BingAtWork.DataType = {}));
+    // defined in bingatworkpeople.20170418.attributeextractorconfig.txt
+    // The names here used is directly from the model definition.
+    var AttributeMetadataHint;
+    (function (AttributeMetadataHint) {
+        AttributeMetadataHint[AttributeMetadataHint["email"] = 0] = "email";
+        AttributeMetadataHint[AttributeMetadataHint["office"] = 1] = "office";
+        AttributeMetadataHint[AttributeMetadataHint["phone"] = 2] = "phone";
+        AttributeMetadataHint[AttributeMetadataHint["title"] = 3] = "title";
+        AttributeMetadataHint[AttributeMetadataHint["department"] = 4] = "department";
+        AttributeMetadataHint[AttributeMetadataHint["people_graph"] = 5] = "people_graph";
+        AttributeMetadataHint[AttributeMetadataHint["Members"] = 6] = "Members";
+        AttributeMetadataHint[AttributeMetadataHint["Files"] = 7] = "Files";
+        AttributeMetadataHint[AttributeMetadataHint["Conversations"] = 8] = "Conversations";
+        AttributeMetadataHint[AttributeMetadataHint["groups"] = 9] = "groups";
+        AttributeMetadataHint[AttributeMetadataHint["person_docs"] = 10] = "person_docs";
+        AttributeMetadataHint[AttributeMetadataHint["alias"] = 11] = "alias";
+    })(AttributeMetadataHint = BingAtWork.AttributeMetadataHint || (BingAtWork.AttributeMetadataHint = {}));
+    var NoteBehavior;
+    (function (NoteBehavior) {
+        NoteBehavior[NoteBehavior["Suppress"] = 0] = "Suppress";
+        NoteBehavior[NoteBehavior["ShowLink"] = 1] = "ShowLink";
+        NoteBehavior[NoteBehavior["ShowNote"] = 2] = "ShowNote";
+    })(NoteBehavior = BingAtWork.NoteBehavior || (BingAtWork.NoteBehavior = {}));
+    var GleamOption;
+    (function (GleamOption) {
+        GleamOption[GleamOption["People"] = 0] = "People";
+        GleamOption[GleamOption["Documents"] = 1] = "Documents";
+        GleamOption[GleamOption["Bookmarks"] = 2] = "Bookmarks";
+        GleamOption[GleamOption["Group"] = 3] = "Group";
+        GleamOption[GleamOption["Buildings"] = 4] = "Buildings";
+        GleamOption[GleamOption["PowerBi"] = 5] = "PowerBi";
+    })(GleamOption = BingAtWork.GleamOption || (BingAtWork.GleamOption = {}));
+    var ConfidenceQueryItem;
+    (function (ConfidenceQueryItem) {
+        ConfidenceQueryItem[ConfidenceQueryItem["High"] = 0] = "High";
+        ConfidenceQueryItem[ConfidenceQueryItem["Low"] = 1] = "Low";
+        ConfidenceQueryItem[ConfidenceQueryItem["None"] = 2] = "None";
+    })(ConfidenceQueryItem = BingAtWork.ConfidenceQueryItem || (BingAtWork.ConfidenceQueryItem = {}));
+    var ResourceDependency;
+    (function (ResourceDependency) {
+        ResourceDependency[ResourceDependency["FloorPlan"] = 0] = "FloorPlan";
+    })(ResourceDependency = BingAtWork.ResourceDependency || (BingAtWork.ResourceDependency = {}));
+    var Treatment;
+    (function (Treatment) {
+        Treatment[Treatment["People"] = 0] = "People";
+        Treatment[Treatment["PeopleDisambig"] = 1] = "PeopleDisambig";
+        Treatment[Treatment["Documents"] = 2] = "Documents";
+        Treatment[Treatment["Bookmarks"] = 3] = "Bookmarks";
+        Treatment[Treatment["Group"] = 4] = "Group";
+        Treatment[Treatment["GroupDisambig"] = 5] = "GroupDisambig";
+        Treatment[Treatment["Buildings"] = 6] = "Buildings";
+        Treatment[Treatment["RefQna"] = 7] = "RefQna";
+        Treatment[Treatment["PowerBi"] = 8] = "PowerBi";
+    })(Treatment = BingAtWork.Treatment || (BingAtWork.Treatment = {}));
+    var PresenceStatus;
+    (function (PresenceStatus) {
+        PresenceStatus[PresenceStatus["Unknown"] = 0] = "Unknown";
+        PresenceStatus[PresenceStatus["Offline"] = 1] = "Offline";
+        PresenceStatus[PresenceStatus["Online"] = 2] = "Online";
+        PresenceStatus[PresenceStatus["Away"] = 3] = "Away";
+        PresenceStatus[PresenceStatus["Busy"] = 4] = "Busy";
+        PresenceStatus[PresenceStatus["BeRightBack"] = 5] = "BeRightBack";
+        PresenceStatus[PresenceStatus["DoNotDisturb"] = 6] = "DoNotDisturb";
+        PresenceStatus[PresenceStatus["Inactive"] = 7] = "Inactive";
+    })(PresenceStatus = BingAtWork.PresenceStatus || (BingAtWork.PresenceStatus = {}));
+    var AnswerPlacement;
+    (function (AnswerPlacement) {
+        AnswerPlacement[AnswerPlacement["None"] = 0] = "None";
+        AnswerPlacement[AnswerPlacement["Pole"] = 1] = "Pole";
+        AnswerPlacement[AnswerPlacement["ContextRegionTop"] = 2] = "ContextRegionTop";
+        AnswerPlacement[AnswerPlacement["ContextRegionBottom"] = 3] = "ContextRegionBottom";
+        AnswerPlacement[AnswerPlacement["Algo"] = 4] = "Algo";
+    })(AnswerPlacement = BingAtWork.AnswerPlacement || (BingAtWork.AnswerPlacement = {}));
+    var QnaItemType;
+    (function (QnaItemType) {
+        QnaItemType[QnaItemType["a"] = "a"] = "a";
+        QnaItemType[QnaItemType["blockquote"] = "blockquote"] = "blockquote";
+        QnaItemType[QnaItemType["br"] = "br"] = "br";
+        QnaItemType[QnaItemType["code"] = "code"] = "code";
+        QnaItemType[QnaItemType["div"] = "div"] = "div";
+        QnaItemType[QnaItemType["em"] = "em"] = "em";
+        QnaItemType[QnaItemType["h1"] = "h1"] = "h1";
+        QnaItemType[QnaItemType["h2"] = "h2"] = "h2";
+        QnaItemType[QnaItemType["h3"] = "h3"] = "h3";
+        QnaItemType[QnaItemType["h4"] = "h4"] = "h4";
+        QnaItemType[QnaItemType["hr"] = "hr"] = "hr";
+        QnaItemType[QnaItemType["img"] = "img"] = "img";
+        QnaItemType[QnaItemType["li"] = "li"] = "li";
+        QnaItemType[QnaItemType["ol"] = "ol"] = "ol";
+        QnaItemType[QnaItemType["ul"] = "ul"] = "ul";
+        QnaItemType[QnaItemType["p"] = "p"] = "p";
+        QnaItemType[QnaItemType["pre"] = "pre"] = "pre";
+        QnaItemType[QnaItemType["strong"] = "strong"] = "strong";
+        QnaItemType[QnaItemType["text"] = "#text"] = "text";
+    })(QnaItemType = BingAtWork.QnaItemType || (BingAtWork.QnaItemType = {}));
+    var ElementInsertBehavior;
+    (function (ElementInsertBehavior) {
+        ElementInsertBehavior[ElementInsertBehavior["Append"] = 0] = "Append";
+        ElementInsertBehavior[ElementInsertBehavior["InsertAsFirst"] = 1] = "InsertAsFirst";
+        ElementInsertBehavior[ElementInsertBehavior["InsertBeforeGrandchild"] = 2] = "InsertBeforeGrandchild";
+    })(ElementInsertBehavior = BingAtWork.ElementInsertBehavior || (BingAtWork.ElementInsertBehavior = {}));
+    var ElementAttachmentState;
+    (function (ElementAttachmentState) {
+        ElementAttachmentState[ElementAttachmentState["Detached"] = 0] = "Detached";
+        ElementAttachmentState[ElementAttachmentState["Attaching"] = 1] = "Attaching";
+        ElementAttachmentState[ElementAttachmentState["Attached"] = 2] = "Attached";
+    })(ElementAttachmentState = BingAtWork.ElementAttachmentState || (BingAtWork.ElementAttachmentState = {}));
+    var NameCardType;
+    (function (NameCardType) {
+        NameCardType[NameCardType["ContextRegion"] = 0] = "ContextRegion";
+        NameCardType[NameCardType["DisambigSlim"] = 1] = "DisambigSlim";
+        NameCardType[NameCardType["GroupMember"] = 2] = "GroupMember";
+        NameCardType[NameCardType["OrgHero"] = 3] = "OrgHero";
+        NameCardType[NameCardType["OrgDirect"] = 4] = "OrgDirect";
+        NameCardType[NameCardType["OrgManager"] = 5] = "OrgManager";
+        NameCardType[NameCardType["OrgPeer"] = 6] = "OrgPeer";
+        NameCardType[NameCardType["OrgSkipManager"] = 7] = "OrgSkipManager";
+        NameCardType[NameCardType["OrgInline"] = 8] = "OrgInline";
+    })(NameCardType = BingAtWork.NameCardType || (BingAtWork.NameCardType = {}));
+    var UxDesignVersion;
+    (function (UxDesignVersion) {
+        UxDesignVersion[UxDesignVersion["V1_0"] = 0] = "V1_0";
+        UxDesignVersion[UxDesignVersion["V1_1"] = 1] = "V1_1";
+    })(UxDesignVersion = BingAtWork.UxDesignVersion || (BingAtWork.UxDesignVersion = {}));
+    var AjaxState;
+    (function (AjaxState) {
+        AjaxState[AjaxState["Unsent"] = 0] = "Unsent";
+        AjaxState[AjaxState["Opened"] = 1] = "Opened";
+        AjaxState[AjaxState["HeadersReceived"] = 2] = "HeadersReceived";
+        AjaxState[AjaxState["Loading"] = 3] = "Loading";
+        AjaxState[AjaxState["Done"] = 4] = "Done";
+    })(AjaxState = BingAtWork.AjaxState || (BingAtWork.AjaxState = {}));
+    // Note: calendar availability enum values are aligned to Exchange.  Please do not change the values.
+    var CalendarAvailability;
+    (function (CalendarAvailability) {
+        CalendarAvailability[CalendarAvailability["Free"] = 0] = "Free";
+        CalendarAvailability[CalendarAvailability["Tentative"] = 1] = "Tentative";
+        CalendarAvailability[CalendarAvailability["Busy"] = 2] = "Busy";
+        CalendarAvailability[CalendarAvailability["OutOfOffice"] = 3] = "OutOfOffice";
+        CalendarAvailability[CalendarAvailability["NoData"] = 4] = "NoData";
+    })(CalendarAvailability = BingAtWork.CalendarAvailability || (BingAtWork.CalendarAvailability = {}));
+})(BingAtWork || (BingAtWork = {}));
+;/// <reference path="UrlUtils.ts" />
+var BingAtWork;
+(function (BingAtWork) {
+    function chk(obj, argIndex) {
+        if (argIndex === void 0) { argIndex = 0; }
+        if (obj == null) {
+            throw new Error("arg " + argIndex + " is null");
+        }
+        return obj;
+    }
+    BingAtWork.chk = chk;
+    function nullOrWs(str) {
+        var whiteSpaceRegex = new RegExp("^\\s*$");
+        return str == null || whiteSpaceRegex.test(str);
+    }
+    BingAtWork.nullOrWs = nullOrWs;
+    function containIgnoreCase(target, contained) {
+        var targetToLowerCase = chk(target).toLowerCase();
+        var containedToLowerCase = chk(contained, 1).toLowerCase();
+        return targetToLowerCase.indexOf(containedToLowerCase) >= 0;
+    }
+    BingAtWork.containIgnoreCase = containIgnoreCase;
+    function getResp(command, isFromQas) {
+        if (command == null) {
+            return null;
+        }
+        if (!isFromQas) {
+            return command.ItemGroups != null ? command.ItemGroups[0] : null;
+        }
+        var analysis = getFirstScopeAnalysis(command.ScopeAnalysis);
+        return {
+            UserInfo: command.UserInfo,
+            Items: analysis != null && analysis.QasIndexItems != null && analysis.QasIndexItems.length > 0 ? JSON.parse(analysis.QasIndexItems[0].Metadata) : null
+        };
+    }
+    BingAtWork.getResp = getResp;
+    function getFirstScopeAnalysis(analysisArray) {
+        return (analysisArray == null || analysisArray.length === 0) ? null : analysisArray[0];
+    }
+    BingAtWork.getFirstScopeAnalysis = getFirstScopeAnalysis;
+    function cpyErr(onSuccess, handler) {
+        return {
+            onSuccess: onSuccess,
+            onError: handler.onError
+        };
+    }
+    BingAtWork.cpyErr = cpyErr;
+    function secondOrNull(array) {
+        return array.length > 1 ? array[1] : null;
+    }
+    BingAtWork.secondOrNull = secondOrNull;
+    // equivalence of string.Format in c#
+    function strFormat(format) {
+        var params = [];
+        for (var _i = 1; _i < arguments.length; _i++) {
+            params[_i - 1] = arguments[_i];
+        }
+        var str = format;
+        for (var i = 0; i < params.length; i++) {
+            var reg = new RegExp("\\{" + i + "\\}", "gm");
+            str = str.replace(reg, arguments[i + 1]);
+        }
+        return str;
+    }
+    BingAtWork.strFormat = strFormat;
+    function getDateAddMinutes(minutes) {
+        var d = new Date();
+        d.setTime(d.getTime() + (minutes * 60 * 1000));
+        return d;
+    }
+    BingAtWork.getDateAddMinutes = getDateAddMinutes;
+    function getQueryFromUrl(url) {
+        url = getUrlOrDefault(url);
+        if (nullOrWs(url)) {
+            return "";
+        }
+        var query = BingAtWork.getParameterByName("q", url);
+        return query == null ? null : query.trim();
+    }
+    BingAtWork.getQueryFromUrl = getQueryFromUrl;
+    function getNormalizedQuery(url) {
+        url = getUrlOrDefault(url);
+        if (nullOrWs(url)) {
+            return "";
+        }
+        var email = BingAtWork.getParameterByName("ue", url);
+        var query = nullOrWs(email) ? getQueryFromUrl(url) : email;
+        if (nullOrWs(query)) {
+            return "";
+        }
+        // Check query on <> and ()
+        var testQuery = trimQuery(query.replace(/[<>\(\)]+/gi, ""));
+        if (nullOrWs(testQuery)) {
+            return "";
+        }
+        return trimQuery(query);
+    }
+    BingAtWork.getNormalizedQuery = getNormalizedQuery;
+    function trimQuery(query) {
+        // Trims "`'"!@#$%^&*)_+=-,./;:[]\{}|~" characters from the beginning of the string
+        var trimStartRegex = /^[\`\'\"\!\@\#\$\%\^\&\*\)\_\+\=\-\,\.\/\;\:\[\]\\\{\}\|\~\?\¿]+/gi;
+        // Trims "`'"!@#$%^&*(_+=-,./;:[]\{}|~?" characters from the end of the string
+        var trimEndRegex = /[\`\'\"\!\@\#\$\%\^\&\*\(\_\+\=\-\,\.\/\;\:\[\]\\\{\}\|\~\?\¿]+$/gi;
+        // Replaces "'s " with " "
+        var apostropheRegex = /('s )/gi;
+        // Replaces whitespace with only one " "
+        var whiteSpaceRegex = /[ ]+/gi;
+        return query.replace(trimStartRegex, "").replace(trimEndRegex, "").replace(apostropheRegex, " ").replace(whiteSpaceRegex, " ").toLowerCase();
+    }
+    function getUrlOrDefault(url) {
+        return nullOrWs(url) ? _w.location.href : url;
+    }
+    function localizeNumber(n) {
+        if (_G != null && _G.Mkt != null) {
+            return n.toLocaleString(_G.Mkt).replace(/\.00$/, ''); // IE 10 will localize 123 to 123.00
+        }
+        return n.toString();
+    }
+    BingAtWork.localizeNumber = localizeNumber;
+})(BingAtWork || (BingAtWork = {}));
+;/// <reference path="Definitions/Service.d.ts" />
+/// <reference path="Enums.ts" />
+/// <reference path="PreContentUtils.ts" />
+/// <reference path="..\..\..\..\Shared\Content\Content\script\declarations\Shared.d.ts" />
+var BingAtWork;
+(function (BingAtWork) {
+    function getUserUrl(fullName, upn, formCode, queryIntent) {
+        var url = "/search?q=" + encodeURIComponent(fullName) + "&ue=" + encodeURIComponent(upn);
+        if (queryIntent != null) {
+            url += "&bfbqi=" + queryIntent;
+        }
+        if (formCode != null) {
+            url += "&FORM=" + encodeURIComponent(formCode);
+        }
+        return url;
+    }
+    BingAtWork.getUserUrl = getUserUrl;
+    function getGroupUrl(groupName, groupId, formCode) {
+        return "search?q=" + encodeURIComponent(groupName) + "&bfbqi=" + BingAtWork.QueryIntent.Group + "&bfbgid=" + encodeURIComponent(groupId) + "&FORM=" + encodeURIComponent(formCode);
+    }
+    BingAtWork.getGroupUrl = getGroupUrl;
+    function getBuildingMapUrl(buildingName) {
+        return "/search?q=building%20" + encodeURIComponent(buildingName) + "&ue=&bfbqi=" + BingAtWork.QueryIntent.Building + "&FORM=BAWBMD";
+    }
+    BingAtWork.getBuildingMapUrl = getBuildingMapUrl;
+    function getRoomInfoUrl(urlFormat, officeLocation, version) {
+        return BingAtWork.strFormat(urlFormat, encodeURIComponent(officeLocation), encodeURIComponent(version || ""));
+    }
+    BingAtWork.getRoomInfoUrl = getRoomInfoUrl;
+    function getFloorPlanUrl(urlFormat, buildingName, floor, version) {
+        return BingAtWork.strFormat(urlFormat, encodeURIComponent(buildingName), encodeURIComponent(floor), encodeURIComponent(version || ""));
+    }
+    BingAtWork.getFloorPlanUrl = getFloorPlanUrl;
+    function getWorkSearchUrl(query) {
+        return "/work/search?q=" + encodeURIComponent(query);
+    }
+    BingAtWork.getWorkSearchUrl = getWorkSearchUrl;
+    function getMtrUrl(endpoint, status) {
+        return "/work/mtr/iras?e=" + endpoint + "&c=" + status;
+    }
+    BingAtWork.getMtrUrl = getMtrUrl;
+    function decodeQuery(value) {
+        var toDecode = value.replace(/\+/g, " ");
+        return decodeURIComponent(toDecode);
+    }
+    BingAtWork.decodeQuery = decodeQuery;
+    function getParameterByName(name, url) {
+        var result = null;
+        var kvp = [];
+        var queryString = url.substring(url.indexOf("?") + 1);
+        queryString.split("&").forEach(function (item) {
+            kvp = item.split("=");
+            if (kvp[0] === name && kvp[1] !== null) {
+                result = decodeQuery(kvp[1]);
+            }
+        });
+        return result;
+    }
+    BingAtWork.getParameterByName = getParameterByName;
+    function mergeArgsIntoUrl(url, args) {
+        if (url.indexOf("?") == -1) {
+            url += "?";
+        }
+        for (var key in args) {
+            url += "&" + encodeURIComponent(key) + "=" + encodeURIComponent(args[key]);
+        }
+        return url;
+    }
+    BingAtWork.mergeArgsIntoUrl = mergeArgsIntoUrl;
+    function getPhoneNumberUrl(phoneNumber) {
+        if (BingAtWork.nullOrWs(phoneNumber)) {
+            return "";
+        }
+        var phoneExtensions = new RegExp(/(\D*x).*$/ig);
+        var nonNumerics = new RegExp(/\D/g);
+        return "tel:+" + phoneNumber.replace(phoneExtensions, "").replace(nonNumerics, "");
+    }
+    BingAtWork.getPhoneNumberUrl = getPhoneNumberUrl;
+    function getEmailUrl(email) {
+        return "mailto:" + email;
+    }
+    BingAtWork.getEmailUrl = getEmailUrl;
+    function getMessengerUrl(email, isMobile, isMe) {
+        if (isMobile) {
+            if (isMe) {
+                return "ms-sfb://start";
+            }
+            else {
+                return "ms-sfb://chat?id=" + email;
+            }
+        }
+        else {
+            return "sip:" + email;
+        }
+    }
+    BingAtWork.getMessengerUrl = getMessengerUrl;
+})(BingAtWork || (BingAtWork = {}));
+;/// <reference path="Definitions/BingAtWork.d.ts" />
+/// <reference path="Definitions/Service.d.ts" />
+/// <reference path="PreContentUtils.ts" />
+/// <reference path="Utils.ts" />
+/// <reference path="../../../../Shared/Content/Content/script/Declarations/Shared.d.ts" />
+/// <reference path="../../../../OrgId/src/Content/Script/Declarations/QueryAccessToken.d.ts" />
+var BingAtWork;
+(function (BingAtWork) {
+    var Service;
+    (function (Service) {
+        var AuthenticationService = (function () {
+            function AuthenticationService(config, isAuthenticated) {
+                var _this = this;
+                this.authTimeOut = false;
+                this.config = BingAtWork.chk(config);
+                this.userAuthenticated = BingAtWork.chk(isAuthenticated, 2);
+                sj_evt.bind(AuthenticationService.signedoutEvt, function () {
+                    _this.userAuthenticated = false;
+                }, /* retroactively bind*/ true, null, true);
+            }
+            AuthenticationService.prototype.isAuthenticated = function (onResponse) {
+                var _this = this;
+                var oide = "OIDE";
+                // check for the test user cookie set after forcing expiry
+                // may not be necessary after implementing id token expiry check
+                if (typeof sj_cook !== "undefined" && sj_cook.get(oide, oide) === "1") {
+                    this.userAuthenticated = false;
+                    sj_cook.set(oide, oide, "0");
+                }
+                if (this.userAuthenticated) {
+                    onResponse.onSuccess(true);
+                    return;
+                }
+                dbg.trace(BingAtWork.bawSourceName, "authenticating");
+                var timer = sb_st(function () {
+                    dbg.trace(BingAtWork.bawSourceName, "auth timed out");
+                    _this.authTimeOut = true;
+                    onResponse.onError(BingAtWork.ErrorReason.AuthFail);
+                }, this.config.accessTokenTimeout);
+                sj_evt.bind(AuthenticationService.signedinEvt, function () {
+                    if (!_this.authTimeOut) {
+                        dbg.trace(BingAtWork.bawSourceName, "auth success");
+                        sb_ct(timer);
+                        _this.userAuthenticated = true;
+                        onResponse.onSuccess(true);
+                    }
+                    else {
+                        dbg.trace(BingAtWork.bawSourceName, "auth success but after timeout");
+                    }
+                }, /* retroactively bind*/ true, null, true);
+            };
+            AuthenticationService.isAuthSuccess = function (authInformation) {
+                return authInformation != null && authInformation.authenticated && authInformation.accesstoken != null;
+            };
+            AuthenticationService.prototype.getClientSubscriptionEventTimedout = function () {
+                return this.authTimeOut;
+            };
+            AuthenticationService.statusEvt = "aad:accesstoken_iras";
+            AuthenticationService.signedinEvt = "aad:signedin";
+            AuthenticationService.signedoutEvt = "aad:signedout";
+            return AuthenticationService;
+        }());
+        Service.AuthenticationService = AuthenticationService;
+    })(Service = BingAtWork.Service || (BingAtWork.Service = {}));
+})(BingAtWork || (BingAtWork = {}));
+;/// <reference path="Definitions/Service.d.ts" />
+/// <reference path="../../../../Shared/Content/Content/script/Declarations/Shared.d.ts" />
+/// <reference path="Definitions/BingAtWork.d.ts" />
+/// <reference path="BingAtWork.ts" />
+var BingAtWork;
+(function (BingAtWork) {
+    var Service;
+    (function (Service) {
+        var PawDataService = (function () {
+            function PawDataService(authService, config) {
+                this.authService = BingAtWork.chk(authService);
+                this.config = BingAtWork.chk(config, 1);
+                this.authService = authService;
+                this.pawSid = sj_cook.get("_SS", "SID");
+                this.pawSid = this.pawSid == null ? config.defaultSid : this.pawSid;
+            }
+            PawDataService.prototype.qry = function (request, onResponse) {
+                var _this = this;
+                var isAuthHandlers = {
+                    onError: onResponse.onError,
+                    onSuccess: function (isAuthenticated) {
+                        if (isAuthenticated) {
+                            _this.execute(BingAtWork.chk(request), onResponse, false);
+                        }
+                        else {
+                            onResponse.onError(BingAtWork.ErrorReason.AuthFail);
+                        }
+                    }
+                };
+                this.authService.isAuthenticated(isAuthHandlers);
+            };
+            PawDataService.prototype.command = function (options, onResponse) {
+                var _this = this;
+                dbg.trace(BingAtWork.bawSourceName, "PawDataService command query: " + options.query);
+                var request = this.buildCmdRequest(options);
+                var isAuthHandlers = {
+                    onError: onResponse.onError,
+                    onSuccess: function (isAuthenticated) {
+                        if (isAuthenticated) {
+                            _this.execute(request, onResponse, true);
+                        }
+                        else {
+                            onResponse.onError(BingAtWork.ErrorReason.AuthFail);
+                        }
+                    }
+                };
+                this.authService.isAuthenticated(isAuthHandlers);
+            };
+            // Get source provanences for document search requests
+            PawDataService.getDocSrc = function (pivot) {
+                switch (pivot) {
+                    case BingAtWork.DocumentSearchPivot.Personalized:
+                        return ["SharePoint", "OfficeMRU"];
+                    case BingAtWork.DocumentSearchPivot.All:
+                        return ["Sharepoint.NoPersonalEdges"];
+                    default:
+                        return null;
+                }
+            };
+            PawDataService.prototype.buildCmdRequest = function (options) {
+                return {
+                    endpoint: BingAtWork.IrasEndpoint.Command,
+                    triggerPolicy: "BingAtWork",
+                    qry: options.query,
+                    executionPolicy: options.doExecute ? "BingAtWork" : null,
+                    sources: options.sources,
+                    orderBy: options.orderBy
+                };
+            };
+            PawDataService.prototype.getCid = function () {
+                return _G.IG || this.config.defaultCid;
+            };
+            // The intention behind this is to ensure we don't show the user data from a previous query after a quick requery.
+            // We ensure this in a few ways:
+            //    1) Does the CID match?
+            //    2) Does the initial extracted query match the current extracted query?
+            //    3) Does the real IRAS query match the current extracted query?
+            // If any of those are true, we should render. All three of those conditions are necessary because of a few different complexities.
+            //    1) The initial extracted query may not match the current extracted query depending on seemingly non-deterministic behavior from AjaxSerp.
+            //    2) The real IRAS query may never match the extracted query because we augment the IRAS query in some scenarios.
+            //    3) The CID may not be the same because of data service caching and AjaxSerp.
+            PawDataService.prototype.shouldProcessResponse = function (cid, bingQuery, irasQuery) {
+                var cidMatches = (cid != null && cid.replace(/-/g, "").toUpperCase() === this.getCid().toUpperCase());
+                var extractedQuery = BingAtWork.getNormalizedQuery();
+                var extractedQueryMatches = bingQuery === extractedQuery;
+                var irasQueryEqualsExtractedQuery = irasQuery != null && irasQuery === extractedQuery;
+                var returner = cidMatches || extractedQueryMatches || irasQueryEqualsExtractedQuery;
+                if (!returner) {
+                    dbg.warn(BingAtWork.bawSourceName, "shouldProcessResponse failed: cidMatches: " + cidMatches + " extractedQueryMatches: " + extractedQueryMatches + " irasQueryEqualsExtractedQuery: " + irasQueryEqualsExtractedQuery + " extractedQuery: " + extractedQuery + " bingQuery: " + bingQuery + " irasQuery: " + irasQuery);
+                }
+                return returner;
+            };
+            PawDataService.prototype.execute = function (request, onResponse, honorShouldProcessResponse) {
+                var _this = this;
+                var pawUrl = this.getUrl(request);
+                if (this.config.useCte) {
+                    var requestMetadata = {
+                        cid: this.getCid(),
+                        sid: this.pawSid
+                    };
+                    if (this.config.flights && this.config.flights.length > 0) {
+                        requestMetadata["variants"] = this.config.flights.join();
+                    }
+                    var flattenedUrl = BingAtWork.mergeArgsIntoUrl(pawUrl.url, requestMetadata);
+                    dbg.trace(BingAtWork.bawSourceName, "Middle tier send request, Ajax with CTE, with flights", request.endpoint, flattenedUrl);
+                    var ajaxCall_1 = sj_gx();
+                    ajaxCall_1.withCredentials = true;
+                    ajaxCall_1.open("POST", flattenedUrl, true);
+                    // Bing and MT queries can differ, get both for further check
+                    var bingQuery_1 = BingAtWork.getNormalizedQuery();
+                    var mtQuery_1 = request.qry;
+                    /* NOTE: We need the accept header to enable Firefox to work properly. If we don't, Firefox will send stricter Accept headers by default
+                    which makes Middle tier not respond properly */
+                    ajaxCall_1.setRequestHeader("Accept", "application/json, text/plain, *" + "/" + "*");
+                    ajaxCall_1.onreadystatechange = function () {
+                        var cid, chunk;
+                        var isChunked = false;
+                        var chunkOffset = -1;
+                        if (ajaxCall_1.readyState === BingAtWork.AjaxState.HeadersReceived) {
+                            if (ajaxCall_1.status === 200) {
+                                cid = ajaxCall_1.getResponseHeader("x-assistant-cid");
+                                var encoding = ajaxCall_1.getResponseHeader('Transfer-Encoding') || '';
+                                encoding = encoding.toLowerCase();
+                                isChunked = encoding.indexOf('chunked') > -1 || encoding.indexOf('identity') > -1;
+                            }
+                            else {
+                                var code = ajaxCall_1.status;
+                                Log.Log("ClientInst", "PAWERR", "BAW", false, "S", code.toString(), "R", pawUrl.url);
+                                var instCall = sj_gx();
+                                instCall.open("GET", BingAtWork.getMtrUrl(request.endpoint, code));
+                                instCall.send();
+                                var reason = BingAtWork.ErrorReason.IrasOther;
+                                switch (code) {
+                                    case 401:
+                                        reason = BingAtWork.ErrorReason.Iras401;
+                                        break;
+                                    case 403:
+                                        reason = BingAtWork.ErrorReason.Iras403;
+                                        break;
+                                    case 500:
+                                        reason = BingAtWork.ErrorReason.Iras500;
+                                        break;
+                                }
+                                dbg.trace(BingAtWork.bawSourceName, "Middle tier response error", "endpoint", request.endpoint, "reason", reason, "status", code);
+                                onResponse.onError(reason);
+                            }
+                        }
+                        else if (ajaxCall_1.status === 200 && ajaxCall_1.responseText != null && ajaxCall_1.responseText.length > 0 &&
+                            (ajaxCall_1.readyState === BingAtWork.AjaxState.Loading || ajaxCall_1.readyState === BingAtWork.AjaxState.Done)) {
+                            var chunk_1 = "";
+                            try {
+                                if (!honorShouldProcessResponse || _this.shouldProcessResponse(cid, bingQuery_1, mtQuery_1)) {
+                                    chunk_1 = _this.extractChunk(ajaxCall_1.responseText, chunkOffset);
+                                    var content = JSON.parse(chunk_1);
+                                    chunkOffset = ajaxCall_1.responseText.length;
+                                    dbg.trace(BingAtWork.bawSourceName, "Middle tier chunked response here for bingQuery: " + bingQuery_1 + ", mtQuery: " + mtQuery_1);
+                                    onResponse.onSuccess(content, _this.getResponseHeaders(ajaxCall_1));
+                                }
+                            }
+                            catch (e) {
+                                dbg.trace(BingAtWork.bawSourceName, "PawDataService exception", e, chunk_1);
+                                onResponse.onError(BingAtWork.ErrorReason.IrasOther);
+                            }
+                        }
+                    };
+                    var sendMessage = pawUrl.postBody != null ? JSON.stringify(pawUrl.postBody) : null;
+                    dbg.trace(BingAtWork.bawSourceName, "Middle tier endpoint", request.endpoint, "body", sendMessage);
+                    ajaxCall_1.send(sendMessage);
+                    dbg.trace(BingAtWork.bawSourceName, "Middle tier call initiated", "endpoint", request.endpoint);
+                }
+                else {
+                    var ajaxCall = sj_gx();
+                    ajaxCall.withCredentials = true;
+                    ajaxCall.open("POST", pawUrl.url, true);
+                    var requestMetadata = {
+                        "x-assistant-cid": this.getCid(),
+                        "x-assistant-sid": this.pawSid,
+                        "x-assistant-client-type": "BingAtWork",
+                        "x-assistant-client-version": "0.1"
+                    };
+                    if (this.config.flights && this.config.flights.length > 0) {
+                        requestMetadata["x-assistant-flights"] = this.config.flights.join();
+                        dbg.trace(BingAtWork.bawSourceName, "Middle tier send request with flights", "endpoint", request.endpoint);
+                    }
+                    for (var key in requestMetadata) {
+                        if (requestMetadata.hasOwnProperty(key)) {
+                            ajaxCall.setRequestHeader(key, requestMetadata[key]);
+                        }
+                    }
+                    // Bing and IRAS queries can differ, get both for further check
+                    var bingQuery_2 = BingAtWork.getNormalizedQuery();
+                    var irasQuery_1 = request.qry;
+                    /* NOTE: We need the accept header to enable Firefox to work properly. If we don't, Firefox will send stricter Accept headers by default
+                    which makes Middle tier not respond properly */
+                    ajaxCall.setRequestHeader("Accept", "application/json, text/plain, *" + "/" + "*");
+                    ajaxCall.onreadystatechange = function () {
+                        if (ajaxCall.readyState === 4) {
+                            if (ajaxCall.status === 200) {
+                                try {
+                                    var cid = ajaxCall.getResponseHeader("x-assistant-cid");
+                                    if (!honorShouldProcessResponse || _this.shouldProcessResponse(cid, bingQuery_2, irasQuery_1)) {
+                                        var content = JSON.parse(ajaxCall.responseText);
+                                        dbg.trace(BingAtWork.bawSourceName, "Middle tier response here for bingQuery: " + bingQuery_2 + ", irasQuery: " + irasQuery_1);
+                                        onResponse.onSuccess(content, _this.getResponseHeaders(ajaxCall));
+                                    }
+                                }
+                                catch (e) {
+                                    dbg.trace(BingAtWork.bawSourceName, "PawDataService exception", e);
+                                    onResponse.onError(BingAtWork.ErrorReason.IrasOther);
+                                }
+                            }
+                            else {
+                                var code = ajaxCall.status;
+                                Log.Log("ClientInst", "PAWERR", "BAW", false, "S", code.toString(), "R", pawUrl.url);
+                                var instCall = sj_gx();
+                                instCall.open("GET", BingAtWork.getMtrUrl(request.endpoint, code));
+                                instCall.send();
+                                var reason = BingAtWork.ErrorReason.IrasOther;
+                                switch (code) {
+                                    case 401:
+                                        reason = BingAtWork.ErrorReason.Iras401;
+                                        break;
+                                    case 403:
+                                        reason = BingAtWork.ErrorReason.Iras403;
+                                        break;
+                                    case 500:
+                                        reason = BingAtWork.ErrorReason.Iras500;
+                                        break;
+                                }
+                                dbg.trace(BingAtWork.bawSourceName, "Middle tier response error", "endpoint", request.endpoint, "reason", reason, "status", code);
+                                onResponse.onError(reason);
+                            }
+                        }
+                    };
+                    var sendMessage = pawUrl.postBody != null ? JSON.stringify(pawUrl.postBody) : null;
+                    dbg.trace(BingAtWork.bawSourceName, "Middle tier endpoint", request.endpoint, "body", sendMessage);
+                    ajaxCall.send(sendMessage);
+                    dbg.trace(BingAtWork.bawSourceName, "Middle tier call initiated", "endpoint", request.endpoint);
+                }
+            };
+            PawDataService.prototype.extractChunk = function (fullText, lastOffset) {
+                if (fullText == null) {
+                    dbg.warn(BingAtWork.bawSourceName, "extractChunk - Null chunk");
+                    return "";
+                }
+                if (fullText.length <= lastOffset) {
+                    dbg.trace(BingAtWork.bawSourceName, "extractChunk - We already processed everything we currently have");
+                    return "";
+                }
+                return fullText.substring(lastOffset + 1, fullText.length);
+            };
+            PawDataService.prototype.getResponseHeaders = function (ajaxCall) {
+                var headers = {};
+                var noPersonalEdgesBackfillHeader = ajaxCall.getResponseHeader(PawDataService.NoPrsBkFill);
+                headers[PawDataService.NoPrsBkFill] = noPersonalEdgesBackfillHeader == null ? "False" : noPersonalEdgesBackfillHeader;
+                return headers;
+            };
+            PawDataService.prototype.getUrl = function (request) {
+                var basicRequest = request;
+                var root = this.config.apiUri;
+                switch (request.endpoint) {
+                    case BingAtWork.IrasEndpoint.PersonalSearch:
+                        var pawScopeRequest = request;
+                        var domain = pawScopeRequest.domain;
+                        var domainName = BingAtWork.ScopeDomain[domain];
+                        var personalSearchRequest = { Scope: { Domain: domainName } };
+                        switch (domain) {
+                            case BingAtWork.ScopeDomain.Person:
+                                personalSearchRequest.Scope.Persons = [{ Name: basicRequest.qry }];
+                                break;
+                            case BingAtWork.ScopeDomain.File:
+                                personalSearchRequest.Scope.Keywords = [{ Keyword: basicRequest.qry }];
+                                if (pawScopeRequest.files != null) {
+                                    personalSearchRequest.Scope.Files = pawScopeRequest.files;
+                                }
+                                if (pawScopeRequest.orderBy != null) {
+                                    personalSearchRequest.Scope.OrderBy = pawScopeRequest.orderBy;
+                                }
+                                if (pawScopeRequest.sources != null) {
+                                    personalSearchRequest.SourceProvenances = pawScopeRequest.sources;
+                                }
+                                break;
+                            case BingAtWork.ScopeDomain.Group:
+                                personalSearchRequest.Scope.Keywords = [{ Keyword: basicRequest.qry }];
+                                break;
+                            default:
+                                throw new Error("Not supported in PersonalSearch: " + domainName);
+                        }
+                        return {
+                            url: root + "personalsearch",
+                            postBody: personalSearchRequest
+                        };
+                    case BingAtWork.IrasEndpoint.Command:
+                        var cmdRequest = request;
+                        var commandUrl = root + "command?nlq=" + encodeURIComponent(basicRequest.qry) + "&commandTriggerPolicy=" + encodeURIComponent(cmdRequest.triggerPolicy);
+                        if (cmdRequest.executionPolicy != null) {
+                            var orderByParam = cmdRequest.orderBy == null ? "" : "&OrderBy=" + cmdRequest.orderBy;
+                            commandUrl += this.constructSourceParams(cmdRequest.sources) + "&commandExecutionPolicy=" + encodeURIComponent(cmdRequest.executionPolicy) + orderByParam;
+                        }
+                        return {
+                            url: commandUrl
+                        };
+                    case BingAtWork.IrasEndpoint.Download:
+                        var downloadRequest = request;
+                        var imageRequest = {
+                            DocumentType: BingAtWork.IrasDownloadKind[downloadRequest.downloadKind],
+                            Id: downloadRequest.qry
+                        };
+                        return {
+                            url: root + "download",
+                            postBody: imageRequest
+                        };
+                    case BingAtWork.IrasEndpoint.Browse:
+                        var browseRequest = request;
+                        var browseDomain = BingAtWork.ScopeDomain[browseRequest.domain];
+                        var browseRoot = root + "browse?";
+                        switch (browseRequest.domain) {
+                            case BingAtWork.ScopeDomain.File:
+                                if (!BingAtWork.nullOrWs(browseRequest.groupId)) {
+                                    // requesting group files
+                                    return {
+                                        url: browseRoot + "domain=" + browseDomain + "&view=Recent&groupid=" + browseRequest.groupId + "&sourceProvenances=MicrosoftGraph"
+                                    };
+                                }
+                                return {
+                                    url: browseRoot + "domain=" + browseDomain + "&view=Person&email=" + encodeURIComponent(browseRequest.qry) + this.constructSourceParams(browseRequest.sources)
+                                };
+                            case BingAtWork.ScopeDomain.Group:
+                                return {
+                                    url: browseRoot + "domain=" + browseDomain + "&view=Recent&email=" + encodeURIComponent(browseRequest.qry) + "&sourceProvenances=MicrosoftGraph"
+                                };
+                            case BingAtWork.ScopeDomain.Person:
+                            case BingAtWork.ScopeDomain.Email:
+                                return {
+                                    url: browseRoot + "domain=" + browseDomain + "&view=Recent&groupid=" + browseRequest.groupId + "&sourceProvenances=MicrosoftGraph"
+                                };
+                            default:
+                                throw new Error("Browse domain " + browseDomain + " is not implemented.");
+                        }
+                    case BingAtWork.IrasEndpoint.Details:
+                        var detailsRequest = request;
+                        var detailsUrl = root + "details?&domain=" + BingAtWork.ScopeDomain[detailsRequest.domain] + "&id=" + encodeURIComponent(detailsRequest.qry);
+                        switch (detailsRequest.domain) {
+                            case BingAtWork.ScopeDomain.Person:
+                                // org chart request
+                                detailsUrl += "&SourceProvenance=QasIndex";
+                                break;
+                            case BingAtWork.ScopeDomain.Group:
+                                detailsUrl += "&SourceProvenance=MicrosoftGraph";
+                                break;
+                        }
+                        return {
+                            url: detailsUrl
+                        };
+                    default:
+                        throw new Error("Endpoint method is not configured for " + request.endpoint);
+                }
+            };
+            PawDataService.prototype.constructSourceParams = function (sources) {
+                if (sources == null || sources.length === 0) {
+                    return "";
+                }
+                var key = "&SourceProvenances=";
+                return key + sources.join(key);
+            };
+            PawDataService.OrdrRel = "Relevance";
+            PawDataService.NoPrsBkFill = "x-assistant-spo-nopersonaledgesbackfill";
+            return PawDataService;
+        }());
+        Service.PawDataService = PawDataService;
+    })(Service = BingAtWork.Service || (BingAtWork.Service = {}));
+})(BingAtWork || (BingAtWork = {}));
+;/// <reference path="Definitions/Service.d.ts" />
+/// <reference path="AuthenticationService.ts" />
+/// <reference path="PawDataService.ts" />
+/// <reference path="Definitions/Enums.d.ts" />
+var BingAtWork;
+(function (BingAtWork) {
+    BingAtWork.rawQuery = null;
+    BingAtWork.normalizedQuery = null;
+    function buildDataService(config, isAuthenticated) {
+        var authService = new BingAtWork.Service.AuthenticationService(config, isAuthenticated);
+        return new BingAtWork.Service.PawDataService(authService, config);
+    }
+    function rawQueryData(query, config) {
+        if (BingAtWork.nullOrWs(query)) {
+            dbg.trace(BingAtWork.bawSourceName, "rawQueryData query is empty");
+            return;
+        }
+        if (!config.useCte) {
+            var cmdHandlers = {
+                onSuccess: function (command) { return sj_evt.fire(BingAtWork.rawCmdEvent, command); },
+                onError: function (reason) { return sj_evt.fire(BingAtWork.rawCmdErr, reason); }
+            };
+            var quOptions = {
+                query: query,
+                doExecute: false
+            };
+            BingAtWork.dataService.command(quOptions, cmdHandlers);
+        }
+        var dataHandlers = {
+            onSuccess: function (command) { return sj_evt.fire(BingAtWork.rawDataEvent, command, false /* not force init view */); },
+            onError: function (reason) { return sj_evt.fire(BingAtWork.rawDataErr, reason); }
+        };
+        var dataOptions = {
+            query: query,
+            doExecute: true,
+            // source for doc search first tab (enum value 0) result
+            sources: BingAtWork.Service.PawDataService.getDocSrc(0),
+            orderBy: BingAtWork.Service.PawDataService.OrdrRel
+        };
+        BingAtWork.dataService.command(dataOptions, dataHandlers);
+    }
+    /*
+        The pre-content entry point.  Evaluates the raw query and fires an event with the result.
+    */
+    function preContent(relativeUrl, config, isAuthenticated) {
+        dbg.trace(BingAtWork.bawSourceName, "preContent", "relativeUrl", relativeUrl, "config", config, "isAuthenticated", isAuthenticated);
+        config = BingAtWork.chk(config, 1);
+        isAuthenticated = BingAtWork.chk(isAuthenticated, 2);
+        if (BingAtWork.dataService == null) {
+            BingAtWork.dataService = buildDataService(config, isAuthenticated);
+        }
+        BingAtWork.rawQuery = BingAtWork.getQueryFromUrl(relativeUrl);
+        BingAtWork.normalizedQuery = BingAtWork.getNormalizedQuery(relativeUrl);
+        rawQueryData(BingAtWork.normalizedQuery, config);
+    }
+    function preContentEntry(args) {
+        if (args.length > 3) {
+            preContent(args[1], args[2], args[3]);
+        }
+        else {
+            dbg.trace(BingAtWork.bawSourceName, "cannot call preContent because arguments are missing");
+        }
+    }
+    BingAtWork.preContentEntry = preContentEntry;
+    sj_evt.bind(BingAtWork.bfbPreExists, preContentEntry, true, null, true);
+})(BingAtWork || (BingAtWork = {}));
+;/// <reference path="Enums.ts" />
+var BingAtWork;
+(function (BingAtWork) {
+    function setReadyTimeStamp() {
+        BingAtWork.PreContentStamp = sb_gt();
+    }
+    setReadyTimeStamp();
+    sj_evt.bind(BingAtWork.ajaxLoad, setReadyTimeStamp);
+})(BingAtWork || (BingAtWork = {}));
+;/// <reference path="../BundleReady.ts" />
+var BingAtWork;
+(function (BingAtWork) {
+    var ajaxCallback = function (relativeUrl, fromBack) {
+        if (BingAtWork.middleTierConfig != null) {
+            if (fromBack && relativeUrl == null) {
+                dbg.trace(BingAtWork.bawSourceName, "AjaxSerp back/forward request");
+                relativeUrl = _w.location.href;
+            }
+            if (relativeUrl != null) {
+                dbg.trace(BingAtWork.bawSourceName, "AjaxSerp request relativeUrl: " + relativeUrl);
+                sj_evt.bind(BingAtWork.bfbPreExists, BingAtWork.preContentEntry, false, null, true);
+                sj_evt.fire(BingAtWork.bfbPreExists, relativeUrl, BingAtWork.middleTierConfig, BingAtWork.isAuthenticated);
+            }
+            else {
+                dbg.warn(BingAtWork.bawSourceName, "AjaxSerp request, but I didn't get the relativeUrl.  Something must have changed in the way they read the query from the search box.  See AjaxSerp answer project. relativeUrl: " + relativeUrl + " middleTierConfig: " + BingAtWork.middleTierConfig);
+            }
+        }
+        else {
+            dbg.warn(BingAtWork.bawSourceName, "BingAtWork.middleTierConfig is null");
+        }
+    };
+    new BingAtWork.BundleReady("OnScriptLoad:BfbPreBundle", ["ajax.requestSent", "ajax.load"], ajaxCallback);
+})(BingAtWork || (BingAtWork = {}));
+;

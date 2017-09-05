@@ -1,0 +1,66 @@
+///<reference path="..\..\..\..\Shared\Content\Content\Script\Declarations\Shared.d.ts" />
+(function () {
+    var u = 'undefined';
+    function log(name) {
+        if (typeof (Log) !== u && typeof (Log.Log) !== u) {
+            Log.Log("NcHeader", "Rewards", name, true);
+        }
+    }
+    function main() {
+        if (typeof (bepcfg) === u) {
+            log("bepcfg Undefined");
+        }
+        else {
+            var nc_iid = _ge("nc_iid");
+            if (nc_iid) {
+                var header = typeof (bepcfg.wb) !== u;
+                var ping = typeof (bepcfg.v) !== u;
+                var IG = nc_iid.getAttribute("_IG");
+                if (!IG || !IG.length) {
+                    IG = _G.IG; // resort to the global variable.
+                }
+                // InsertId for instrumenting dynamic event
+                var instrumentationParams = "&IID=" + nc_iid.getAttribute("_iid") + "&IG=" + IG;
+                if (ping) {
+                    try {
+                        sj_cook.get('');
+                    }
+                    catch (e) {
+                        // Client's cookie is blocked from being accessed. This usually happens
+                        // when client host bing.com in an iframe with the attribute allow-same-origin turned off
+                        // and this usually happens when the client is a fraudster.
+                        // We need to pass Client ID info explicitly in the query string in order for the RewardsPing
+                        // data properly merged with the master SERP request.
+                        instrumentationParams += "&CID=" + nc_iid.getAttribute("_cid");
+                    }
+                }
+                var url = '/rewardsapp/ncheader?ver=' + _G.AppVer + instrumentationParams;
+                var w = [_w.top, _w];
+                var ajax = sj_gx();
+                ajax.open("POST", url, true);
+                ajax.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+                // Only bind handler to process ajax response when bepcfg.wb is defined, i.e., when IsBepEnabled is true.
+                if (header) {
+                    ajax.onreadystatechange = (function () {
+                        if (ajax && ajax.readyState == 4 && ajax.status == 200) {
+                            sj_appHTML(sj_b, ajax.responseText);
+                        }
+                    });
+                }
+                var webBlueParameter = "wb=" + (header ? bepcfg.wb : '0');
+                if (ping) {
+                    // w[0] !== w[1].self test if the page is in iframe.
+                    webBlueParameter += ";i=" + (w[0] !== w[1].self ? 0 : 1) + ';v=' + bepcfg.v;
+                }
+                ajax.send(webBlueParameter);
+            }
+            else {
+                log("nc_iid NotFound");
+            }
+        }
+    }
+    // Load only once per page (required with Ajax based pages coming up)
+    sj_evt.bind("onHTML", function () {
+        main();
+    }, true, 0);
+})();
